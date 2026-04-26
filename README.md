@@ -1,18 +1,8 @@
 # Parcial 1 — Programación IV
 
-**Tecnicatura Universitaria en Programación — UTN (A Distancia)**
 
 Aplicación Fullstack de gestión de productos gastronómicos con categorías e ingredientes. Desarrollada con **FastAPI + SQLModel** en el backend y **React + TypeScript + TanStack Query** en el frontend.
 
----
-
-## Integrantes
-
-| Rol | Alumno |
-|-----|--------|
-| Backend | Axel Mejias |
-| Frontend | Nico |
-| Video | Loe |
 
 ---
 
@@ -124,7 +114,3 @@ App disponible en: `http://localhost:5173`
 | DELETE | `/productos/{id}` | Eliminar producto |
 
 ---
-
-## Video de presentación
-
-> 🎥 Link al video: *(completar al entregar)*
