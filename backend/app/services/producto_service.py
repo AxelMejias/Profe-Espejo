@@ -1,12 +1,7 @@
 from typing import List, Optional
-from sqlmodel import Session, select
-from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
-from app.models.producto import Producto
-from app.models.categoria import Categoria
-from app.models.ingrediente import Ingrediente
-from app.models.links import ProductoCategoria, ProductoIngrediente
+from app.repositories.producto_repository import ProductoRepository
 from app.schemas.producto import (
     ProductoCreate,
     ProductoUpdate,
@@ -15,30 +10,18 @@ from app.schemas.producto import (
     CategoriaResponse,
     IngredienteDeProductoResponse,
 )
+from app.uow.unit_of_work import UnitOfWork
 
 
-def _build_response(session: Session, producto: Producto) -> ProductoResponse:
-    """
-    Construye un ProductoResponse con sus categorías e ingredientes (con cantidad).
-    Debe llamarse dentro del contexto de sesión activa.
-    """
-    # Cargar categorías via relación N:N
-    cats_stmt = (
-        select(Categoria)
-        .join(ProductoCategoria, ProductoCategoria.categoria_id == Categoria.id)
-        .where(ProductoCategoria.producto_id == producto.id)
-    )
-    categorias = session.exec(cats_stmt).all()
-
-    # Cargar ingredientes junto con su cantidad desde la tabla intermedia
-    pi_stmt = select(ProductoIngrediente).where(
-        ProductoIngrediente.producto_id == producto.id
-    )
-    pi_links = session.exec(pi_stmt).all()
+def _build_response(repo: ProductoRepository, producto_id: int) -> ProductoResponse:
+    from app.models.producto import Producto
+    producto = repo.get_by_id(producto_id)
+    categorias = repo.get_links_categoria(producto_id)
+    pi_links = repo.get_links_ingrediente(producto_id)
 
     ingredientes_resp = []
     for pi in pi_links:
-        ing = session.get(Ingrediente, pi.ingrediente_id)
+        ing = repo.get_ingrediente(pi.ingrediente_id)
         if ing:
             ingredientes_resp.append(
                 IngredienteDeProductoResponse(
@@ -54,13 +37,14 @@ def _build_response(session: Session, producto: Producto) -> ProductoResponse:
         nombre=producto.nombre,
         descripcion=producto.descripcion,
         precio=producto.precio,
+        created_at=producto.created_at,
+        updated_at=producto.updated_at,
         categorias=[CategoriaResponse.model_validate(c) for c in categorias],
         ingredientes=ingredientes_resp,
     )
 
 
 def get_all(
-    session: Session,
     nombre: Optional[str] = None,
     precio_min: Optional[float] = None,
     precio_max: Optional[float] = None,
@@ -68,116 +52,80 @@ def get_all(
     offset: int = 0,
     limit: int = 10,
 ) -> List[ProductoListItem]:
-    query = select(Producto)
-    if nombre:
-        query = query.where(Producto.nombre.icontains(nombre))
-    if precio_min is not None:
-        query = query.where(Producto.precio >= precio_min)
-    if precio_max is not None:
-        query = query.where(Producto.precio <= precio_max)
-    if categoria_id is not None:
-        query = query.join(ProductoCategoria).where(
-            ProductoCategoria.categoria_id == categoria_id
+    with UnitOfWork() as uow:
+        repo = ProductoRepository(uow.session)
+        productos = repo.get_all(
+            nombre=nombre,
+            precio_min=precio_min,
+            precio_max=precio_max,
+            categoria_id=categoria_id,
+            offset=offset,
+            limit=limit,
         )
-    productos = session.exec(query.offset(offset).limit(limit)).all()
-    return [ProductoListItem.model_validate(p) for p in productos]
+        return [ProductoListItem.model_validate(p) for p in productos]
 
 
-def get_by_id(session: Session, producto_id: int) -> ProductoResponse:
-    producto = session.get(Producto, producto_id)
-    if not producto:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Producto con ID {producto_id} no encontrado",
-        )
-    return _build_response(session, producto)
-
-
-def create(session: Session, data: ProductoCreate) -> ProductoResponse:
-    # Verificar nombre duplicado
-    existing = session.exec(
-        select(Producto).where(Producto.nombre == data.nombre)
-    ).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Ya existe un producto con el nombre '{data.nombre}'",
-        )
-
-    # Crear producto con campos básicos
-    producto = Producto(
-        nombre=data.nombre,
-        descripcion=data.descripcion,
-        precio=data.precio,
-    )
-    session.add(producto)
-    session.flush()  # Obtener el ID generado
-
-    # Asociar categorías
-    for cat_id in data.categoria_ids:
-        if not session.get(Categoria, cat_id):
+def get_by_id(producto_id: int) -> ProductoResponse:
+    with UnitOfWork() as uow:
+        repo = ProductoRepository(uow.session)
+        if not repo.get_by_id(producto_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Categoría con ID {cat_id} no encontrada",
+                detail=f"Producto con ID {producto_id} no encontrado",
             )
-        session.add(ProductoCategoria(producto_id=producto.id, categoria_id=cat_id))
+        return _build_response(repo, producto_id)
 
-    # Asociar ingredientes con cantidad
-    for ing_input in data.ingredientes:
-        if not session.get(Ingrediente, ing_input.ingrediente_id):
+
+def create(data: ProductoCreate) -> ProductoResponse:
+    with UnitOfWork() as uow:
+        repo = ProductoRepository(uow.session)
+        if repo.get_by_nombre(data.nombre):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un producto con el nombre '{data.nombre}'",
+            )
+        producto = repo.create(data)
+        for cat_id in data.categoria_ids:
+            if not repo.get_categoria(cat_id):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Categoría con ID {cat_id} no encontrada",
+                )
+            repo.add_categoria_link(producto.id, cat_id)
+        for ing_input in data.ingredientes:
+            if not repo.get_ingrediente(ing_input.ingrediente_id):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Ingrediente con ID {ing_input.ingrediente_id} no encontrado",
+                )
+            repo.add_ingrediente_link(
+                producto.id, ing_input.ingrediente_id, ing_input.cantidad
+            )
+        uow.session.flush()
+        uow.session.refresh(producto)
+        return _build_response(repo, producto.id)
+
+
+def update(producto_id: int, data: ProductoUpdate) -> ProductoResponse:
+    with UnitOfWork() as uow:
+        repo = ProductoRepository(uow.session)
+        producto = repo.get_by_id(producto_id)
+        if not producto:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Ingrediente con ID {ing_input.ingrediente_id} no encontrado",
+                detail=f"Producto con ID {producto_id} no encontrado",
             )
-        session.add(
-            ProductoIngrediente(
-                producto_id=producto.id,
-                ingrediente_id=ing_input.ingrediente_id,
-                cantidad=ing_input.cantidad,
+        repo.update(producto, data)
+        return _build_response(repo, producto_id)
+
+
+def delete(producto_id: int) -> None:
+    with UnitOfWork() as uow:
+        repo = ProductoRepository(uow.session)
+        producto = repo.get_by_id(producto_id)
+        if not producto:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Producto con ID {producto_id} no encontrado",
             )
-        )
-
-    session.flush()
-    session.refresh(producto)
-    return _build_response(session, producto)
-
-
-def update(session: Session, producto_id: int, data: ProductoUpdate) -> ProductoResponse:
-    producto = session.get(Producto, producto_id)
-    if not producto:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Producto con ID {producto_id} no encontrado",
-        )
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(producto, key, value)
-    session.add(producto)
-    session.flush()
-    session.refresh(producto)
-    return _build_response(session, producto)
-
-
-def delete(session: Session, producto_id: int) -> None:
-    producto = session.get(Producto, producto_id)
-    if not producto:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Producto con ID {producto_id} no encontrado",
-        )
-    # Eliminar relaciones primero
-    session.exec(
-        select(ProductoCategoria).where(ProductoCategoria.producto_id == producto_id)
-    )
-    for pc in session.exec(
-        select(ProductoCategoria).where(ProductoCategoria.producto_id == producto_id)
-    ).all():
-        session.delete(pc)
-
-    for pi in session.exec(
-        select(ProductoIngrediente).where(ProductoIngrediente.producto_id == producto_id)
-    ).all():
-        session.delete(pi)
-
-    session.delete(producto)
-    session.flush()
+        repo.delete(producto)

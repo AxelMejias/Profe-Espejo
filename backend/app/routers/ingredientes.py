@@ -3,7 +3,6 @@ from fastapi import APIRouter, Query, Path, status
 
 from app.schemas.ingrediente import IngredienteCreate, IngredienteUpdate, IngredienteResponse
 from app.services import ingrediente_service
-from app.uow.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/ingredientes", tags=["Ingredientes"])
 
@@ -18,31 +17,21 @@ def listar_ingredientes(
         Optional[str],
         Query(description="Filtrar por unidad de medida", max_length=50),
     ] = None,
-    offset: Annotated[int, Query(ge=0, description="Registros a omitir (paginación)")] = 0,
-    limit: Annotated[
-        int, Query(ge=1, le=100, description="Máximo de registros a retornar")
-    ] = 10,
+    offset: Annotated[int, Query(ge=0, description="Registros a omitir")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Máximo de registros")] = 10,
 ):
-    with UnitOfWork() as uow:
-        return ingrediente_service.get_all(
-            uow.session,
-            nombre=nombre,
-            unidad_medida=unidad_medida,
-            offset=offset,
-            limit=limit,
-        )
+    return ingrediente_service.get_all(
+        nombre=nombre, unidad_medida=unidad_medida, offset=offset, limit=limit
+    )
 
 
 @router.get(
-    "/{ingrediente_id}",
-    response_model=IngredienteResponse,
-    summary="Obtener ingrediente por ID",
+    "/{ingrediente_id}", response_model=IngredienteResponse, summary="Obtener ingrediente por ID"
 )
 def obtener_ingrediente(
     ingrediente_id: Annotated[int, Path(ge=1, description="ID del ingrediente")],
 ):
-    with UnitOfWork() as uow:
-        return ingrediente_service.get_by_id(uow.session, ingrediente_id)
+    return ingrediente_service.get_by_id(ingrediente_id)
 
 
 @router.post(
@@ -52,21 +41,17 @@ def obtener_ingrediente(
     summary="Crear nuevo ingrediente",
 )
 def crear_ingrediente(data: IngredienteCreate):
-    with UnitOfWork() as uow:
-        return ingrediente_service.create(uow.session, data)
+    return ingrediente_service.create(data)
 
 
 @router.put(
-    "/{ingrediente_id}",
-    response_model=IngredienteResponse,
-    summary="Actualizar ingrediente",
+    "/{ingrediente_id}", response_model=IngredienteResponse, summary="Actualizar ingrediente"
 )
 def actualizar_ingrediente(
     ingrediente_id: Annotated[int, Path(ge=1, description="ID del ingrediente")],
     data: IngredienteUpdate,
 ):
-    with UnitOfWork() as uow:
-        return ingrediente_service.update(uow.session, ingrediente_id, data)
+    return ingrediente_service.update(ingrediente_id, data)
 
 
 @router.delete(
@@ -77,5 +62,4 @@ def actualizar_ingrediente(
 def eliminar_ingrediente(
     ingrediente_id: Annotated[int, Path(ge=1, description="ID del ingrediente")],
 ):
-    with UnitOfWork() as uow:
-        ingrediente_service.delete(uow.session, ingrediente_id)
+    ingrediente_service.delete(ingrediente_id)

@@ -1,0 +1,101 @@
+====================================================
+  INSTRUCCIONES PARA LEVANTAR EL PROYECTO DESDE 0
+====================================================
+
+REQUISITOS: tener instalado VSCode (ya lo tenes)
+
+
+----------------------------------------------------
+PASO 1 - INSTALAR POSTGRESQL
+----------------------------------------------------
+1. Entrar a: https://www.postgresql.org/download/windows/
+2. Descargar el instalador para Windows (version 16 o superior)
+3. Instalar con las opciones por defecto
+4. Cuando te pida una contraseña para el usuario "postgres", poner: postgres
+5. Puerto por defecto: 5432 (no cambiar)
+6. Terminar la instalacion
+
+----------------------------------------------------
+PASO 2 - INSTALAR PYTHON
+----------------------------------------------------
+1. Entrar a: https://www.python.org/downloads/
+2. Descargar la version 3.11 o superior
+3. En el instalador, IMPORTANTE: tildar "Add Python to PATH" antes de instalar
+4. Instalar con las opciones por defecto
+
+----------------------------------------------------
+PASO 3 - INSTALAR NODE.JS
+----------------------------------------------------
+1. Entrar a: https://nodejs.org/
+2. Descargar la version LTS (la recomendada)
+3. Instalar con las opciones por defecto
+
+----------------------------------------------------
+PASO 4 - CREAR LA BASE DE DATOS
+----------------------------------------------------
+1. Abrir el menu de Windows y buscar "SQL Shell (psql)"
+2. Abrirlo
+3. Presionar Enter en todas las preguntas hasta que pida la contrasena
+4. Escribir: postgres  (y Enter)
+5. Una vez adentro, ejecutar este comando:
+   CREATE DATABASE parcial1_db;
+6. Escribir \q y Enter para salir
+
+----------------------------------------------------
+PASO 5 - CONFIGURAR EL BACKEND
+----------------------------------------------------
+1. Abrir VSCode
+2. Abrir la carpeta del proyecto (File > Open Folder)
+3. Abrir una terminal en VSCode (Ctrl + `)
+4. Navegar al backend:
+   cd backend
+5. Crear el entorno virtual:
+   python -m venv .venv
+6. Activarlo:
+   .venv\Scripts\activate
+7. Instalar las dependencias:
+   pip install -r requirements.txt
+8. Verificar que el archivo backend\.env tenga este contenido:
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/parcial1_db
+9. Iniciar el backend:
+   uvicorn main:app --reload
+
+   --> El backend queda corriendo en http://localhost:8000
+   --> Podes ver los endpoints en http://localhost:8000/docs
+
+----------------------------------------------------
+PASO 6 - CONFIGURAR EL FRONTEND
+----------------------------------------------------
+1. Abrir UNA SEGUNDA terminal en VSCode (click en el + de la terminal)
+2. Navegar al frontend:
+   cd frontend
+3. Instalar las dependencias:
+   npm install
+4. Iniciar el frontend:
+   npm run dev
+
+   --> La pagina queda en http://localhost:5173
+
+----------------------------------------------------
+PASO 7 - USAR LA APP
+----------------------------------------------------
+1. Asegurate de que AMBAS terminales esten corriendo (backend y frontend)
+2. Abrir el navegador y entrar a: http://localhost:5173
+3. Listo!
+
+Para detener cualquiera de los dos, presionar Ctrl+C en su terminal.
+
+====================================================
+  RESUMEN DE COMANDOS (una vez que ya esta todo instalado)
+====================================================
+
+Terminal 1 - Backend:
+  cd backend
+  .venv\Scripts\activate
+  uvicorn main:app --reload
+
+Terminal 2 - Frontend:
+  cd frontend
+  npm run dev  (no hace falta volver a hacer npm install)
+
+====================================================

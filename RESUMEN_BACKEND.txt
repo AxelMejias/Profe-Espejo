@@ -1,0 +1,187 @@
+====================================================
+        RESUMEN TECNICO DEL BACKEND - PARCIAL 1
+====================================================
+
+
+----------------------------------------------------
+TECNOLOGIAS UTILIZADAS
+----------------------------------------------------
+
+- FastAPI          : framework web para construir la API REST
+- SQLModel         : ORM que combina SQLAlchemy + Pydantic (modelos de BD y validacion en uno)
+- SQLAlchemy       : motor de queries y manejo de sesiones de base de datos
+- PostgreSQL       : base de datos relacional
+- Pydantic         : validacion de datos de entrada/salida (schemas)
+- Uvicorn          : servidor ASGI para correr FastAPI
+- psycopg2-binary  : driver para conectar Python con PostgreSQL
+- python-dotenv    : cargar variables de entorno desde el archivo .env
+
+
+----------------------------------------------------
+ENTIDADES Y MODELOS
+----------------------------------------------------
+
+El sistema maneja 5 tablas en la base de datos:
+
+1. CATEGORIA
+   - id (PK, autoincremental)
+   - nombre (string, obligatorio, 2-100 caracteres)
+   - descripcion (string, opcional, max 255 caracteres)
+
+2. INGREDIENTE
+   - id (PK, autoincremental)
+   - nombre (string, obligatorio, 2-100 caracteres)
+   - unidad_medida (string, obligatorio — ej: kg, g, ml, unidad)
+
+3. PRODUCTO
+   - id (PK, autoincremental)
+   - nombre (string, obligatorio, 2-100 caracteres)
+   - descripcion (string, opcional, max 500 caracteres)
+   - precio (float, obligatorio, mayor a 0)
+
+4. PRODUCTO_CATEGORIA (tabla intermedia N:N)
+   - producto_id (FK -> producto.id) + categoria_id (FK -> categoria.id)
+   - Clave primaria compuesta: (producto_id, categoria_id)
+
+5. PRODUCTO_INGREDIENTE (tabla intermedia N:N con dato extra)
+   - producto_id (FK -> producto.id) + ingrediente_id (FK -> ingrediente.id)
+   - cantidad (float, obligatorio, mayor a 0)
+   - Clave primaria compuesta: (producto_id, ingrediente_id)
+
+
+----------------------------------------------------
+RELACIONES ENTRE ENTIDADES
+----------------------------------------------------
+
+Producto  <>------<>  Categoria
+  Un producto puede pertenecer a muchas categorias.
+  Una categoria puede tener muchos productos.
+  Tabla intermedia: producto_categoria
+
+Producto  <>------<>  Ingrediente
+  Un producto puede tener muchos ingredientes.
+  Un ingrediente puede estar en muchos productos.
+  Tabla intermedia: producto_ingrediente (tiene el campo "cantidad")
+  -> La cantidad indica cuanto de ese ingrediente lleva ese producto especifico.
+
+Las relaciones N:N se implementaron con SQLModel usando:
+  - Relationship() con back_populates y link_model en los modelos
+  - Tablas de enlace separadas (link tables) con sus propias clases SQLModel
+
+
+----------------------------------------------------
+ARQUITECTURA Y PATRONES DE DISEÑO
+----------------------------------------------------
+
+Se siguio una arquitectura en capas:
+
+  Routers (endpoints)
+      |
+  Services (logica de negocio)
+      |
+  Unit of Work (manejo de sesion/transaccion)
+      |
+  Modelos SQLModel (tablas de la BD)
+
+UNIT OF WORK (uow/unit_of_work.py):
+  Patron de diseño que encapsula el ciclo de vida de la sesion de base de datos.
+  Se usa como context manager (bloque "with"):
+    - Si todo sale bien -> hace commit automatico al salir del bloque
+    - Si ocurre una excepcion -> hace rollback automatico
+  Garantiza que las operaciones sean atomicas (todo o nada).
+
+SCHEMAS PYDANTIC (separados de los modelos):
+  Los modelos SQLModel definen la estructura de la base de datos.
+  Los schemas Pydantic definen lo que entra y sale por la API.
+  Esto separa la capa de persistencia de la capa de presentacion.
+  Schemas usados: Create, Update, Response, ListItem (para listados simplificados).
+
+SERVICIOS:
+  Cada entidad tiene su archivo de servicio con las funciones:
+  get_all, get_by_id, create, update, delete
+  La logica de negocio (validaciones, queries, construccion de respuestas) vive aca.
+
+
+----------------------------------------------------
+ENDPOINTS DE LA API
+----------------------------------------------------
+
+BASE URL: http://localhost:8000
+DOCS SWAGGER: http://localhost:8000/docs
+
+--- CATEGORIAS ---
+GET    /categorias/              Lista todas las categorias (filtros: nombre, offset, limit)
+GET    /categorias/{id}          Obtiene una categoria por ID
+POST   /categorias/              Crea una categoria nueva
+PUT    /categorias/{id}          Actualiza una categoria
+DELETE /categorias/{id}          Elimina una categoria
+
+--- INGREDIENTES ---
+GET    /ingredientes/            Lista todos los ingredientes (filtros: nombre, unidad_medida, offset, limit)
+GET    /ingredientes/{id}        Obtiene un ingrediente por ID
+POST   /ingredientes/            Crea un ingrediente nuevo
+PUT    /ingredientes/{id}        Actualiza un ingrediente
+DELETE /ingredientes/{id}        Elimina un ingrediente
+
+--- PRODUCTOS ---
+GET    /productos/               Lista productos (filtros: nombre, precio_min, precio_max, categoria_id, offset, limit)
+GET    /productos/{id}           Obtiene producto completo (con sus categorias e ingredientes + cantidad)
+POST   /productos/               Crea un producto con sus categorias e ingredientes
+PUT    /productos/{id}           Actualiza los campos basicos del producto
+DELETE /productos/{id}           Elimina el producto y sus relaciones
+
+
+----------------------------------------------------
+VALIDACIONES IMPLEMENTADAS
+----------------------------------------------------
+
+- Campos obligatorios con minimo/maximo de caracteres (Field con min_length, max_length)
+- Precio y cantidad siempre mayores a 0 (Field con gt=0)
+- Paginacion en todos los listados (offset y limit con valores maximos)
+- Filtros opcionales en los listados via Query parameters
+- IDs en la URL validados con Path (ge=1, entero positivo)
+- Nombre duplicado en Producto: devuelve 409 Conflict
+- ID no encontrado: devuelve 404 Not Found
+- Annotated + Query + Path de FastAPI para documentar y validar automaticamente
+
+
+----------------------------------------------------
+CORS
+----------------------------------------------------
+
+El backend permite requests desde:
+  - http://localhost:5173  (frontend Vite en desarrollo)
+  - http://localhost:3000  (alternativa)
+
+
+----------------------------------------------------
+ESTRUCTURA DE CARPETAS
+----------------------------------------------------
+
+backend/
+  main.py                  <- Punto de entrada, instancia FastAPI, registra routers
+  requirements.txt         <- Dependencias del proyecto
+  .env                     <- Variables de entorno (DATABASE_URL)
+  app/
+    database.py            <- Conexion a PostgreSQL, creacion de tablas
+    models/
+      links.py             <- Tablas intermedias N:N (ProductoCategoria, ProductoIngrediente)
+      categoria.py         <- Modelo Categoria
+      ingrediente.py       <- Modelo Ingrediente
+      producto.py          <- Modelo Producto
+    schemas/
+      categoria.py         <- Schemas Pydantic para Categoria
+      ingrediente.py       <- Schemas Pydantic para Ingrediente
+      producto.py          <- Schemas Pydantic para Producto
+    services/
+      categoria_service.py <- Logica de negocio para Categoria
+      ingrediente_service.py <- Logica de negocio para Ingrediente
+      producto_service.py  <- Logica de negocio para Producto
+    routers/
+      categorias.py        <- Endpoints /categorias
+      ingredientes.py      <- Endpoints /ingredientes
+      productos.py         <- Endpoints /productos
+    uow/
+      unit_of_work.py      <- Patron Unit of Work
+
+====================================================

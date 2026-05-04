@@ -8,7 +8,6 @@ from app.schemas.producto import (
     ProductoResponse,
 )
 from app.services import producto_service
-from app.uow.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
@@ -19,30 +18,22 @@ def listar_productos(
         Optional[str],
         Query(description="Filtrar por nombre (búsqueda parcial)", max_length=100),
     ] = None,
-    precio_min: Annotated[
-        Optional[float], Query(ge=0, description="Precio mínimo")
-    ] = None,
-    precio_max: Annotated[
-        Optional[float], Query(ge=0, description="Precio máximo")
-    ] = None,
+    precio_min: Annotated[Optional[float], Query(ge=0, description="Precio mínimo")] = None,
+    precio_max: Annotated[Optional[float], Query(ge=0, description="Precio máximo")] = None,
     categoria_id: Annotated[
         Optional[int], Query(ge=1, description="Filtrar por ID de categoría")
     ] = None,
-    offset: Annotated[int, Query(ge=0, description="Registros a omitir (paginación)")] = 0,
-    limit: Annotated[
-        int, Query(ge=1, le=100, description="Máximo de registros a retornar")
-    ] = 10,
+    offset: Annotated[int, Query(ge=0, description="Registros a omitir")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Máximo de registros")] = 10,
 ):
-    with UnitOfWork() as uow:
-        return producto_service.get_all(
-            uow.session,
-            nombre=nombre,
-            precio_min=precio_min,
-            precio_max=precio_max,
-            categoria_id=categoria_id,
-            offset=offset,
-            limit=limit,
-        )
+    return producto_service.get_all(
+        nombre=nombre,
+        precio_min=precio_min,
+        precio_max=precio_max,
+        categoria_id=categoria_id,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -53,8 +44,7 @@ def listar_productos(
 def obtener_producto(
     producto_id: Annotated[int, Path(ge=1, description="ID del producto")],
 ):
-    with UnitOfWork() as uow:
-        return producto_service.get_by_id(uow.session, producto_id)
+    return producto_service.get_by_id(producto_id)
 
 
 @router.post(
@@ -64,8 +54,7 @@ def obtener_producto(
     summary="Crear nuevo producto con categorías e ingredientes",
 )
 def crear_producto(data: ProductoCreate):
-    with UnitOfWork() as uow:
-        return producto_service.create(uow.session, data)
+    return producto_service.create(data)
 
 
 @router.put(
@@ -77,8 +66,7 @@ def actualizar_producto(
     producto_id: Annotated[int, Path(ge=1, description="ID del producto")],
     data: ProductoUpdate,
 ):
-    with UnitOfWork() as uow:
-        return producto_service.update(uow.session, producto_id, data)
+    return producto_service.update(producto_id, data)
 
 
 @router.delete(
@@ -89,5 +77,4 @@ def actualizar_producto(
 def eliminar_producto(
     producto_id: Annotated[int, Path(ge=1, description="ID del producto")],
 ):
-    with UnitOfWork() as uow:
-        producto_service.delete(uow.session, producto_id)
+    producto_service.delete(producto_id)

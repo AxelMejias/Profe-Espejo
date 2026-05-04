@@ -3,7 +3,6 @@ from fastapi import APIRouter, Query, Path, status
 
 from app.schemas.categoria import CategoriaCreate, CategoriaUpdate, CategoriaResponse
 from app.services import categoria_service
-from app.uow.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/categorias", tags=["Categorías"])
 
@@ -14,25 +13,17 @@ def listar_categorias(
         Optional[str],
         Query(description="Filtrar por nombre (búsqueda parcial)", max_length=100),
     ] = None,
-    offset: Annotated[int, Query(ge=0, description="Registros a omitir (paginación)")] = 0,
-    limit: Annotated[
-        int, Query(ge=1, le=100, description="Máximo de registros a retornar")
-    ] = 10,
+    offset: Annotated[int, Query(ge=0, description="Registros a omitir")] = 0,
+    limit: Annotated[int, Query(ge=1, le=100, description="Máximo de registros")] = 10,
 ):
-    with UnitOfWork() as uow:
-        return categoria_service.get_all(uow.session, nombre=nombre, offset=offset, limit=limit)
+    return categoria_service.get_all(nombre=nombre, offset=offset, limit=limit)
 
 
-@router.get(
-    "/{categoria_id}",
-    response_model=CategoriaResponse,
-    summary="Obtener categoría por ID",
-)
+@router.get("/{categoria_id}", response_model=CategoriaResponse, summary="Obtener categoría por ID")
 def obtener_categoria(
     categoria_id: Annotated[int, Path(ge=1, description="ID de la categoría")],
 ):
-    with UnitOfWork() as uow:
-        return categoria_service.get_by_id(uow.session, categoria_id)
+    return categoria_service.get_by_id(categoria_id)
 
 
 @router.post(
@@ -42,21 +33,15 @@ def obtener_categoria(
     summary="Crear nueva categoría",
 )
 def crear_categoria(data: CategoriaCreate):
-    with UnitOfWork() as uow:
-        return categoria_service.create(uow.session, data)
+    return categoria_service.create(data)
 
 
-@router.put(
-    "/{categoria_id}",
-    response_model=CategoriaResponse,
-    summary="Actualizar categoría",
-)
+@router.put("/{categoria_id}", response_model=CategoriaResponse, summary="Actualizar categoría")
 def actualizar_categoria(
     categoria_id: Annotated[int, Path(ge=1, description="ID de la categoría")],
     data: CategoriaUpdate,
 ):
-    with UnitOfWork() as uow:
-        return categoria_service.update(uow.session, categoria_id, data)
+    return categoria_service.update(categoria_id, data)
 
 
 @router.delete(
@@ -67,5 +52,4 @@ def actualizar_categoria(
 def eliminar_categoria(
     categoria_id: Annotated[int, Path(ge=1, description="ID de la categoría")],
 ):
-    with UnitOfWork() as uow:
-        categoria_service.delete(uow.session, categoria_id)
+    categoria_service.delete(categoria_id)

@@ -1,4 +1,5 @@
 from typing import Optional, List, TYPE_CHECKING
+from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
 from app.models.links import ProductoCategoria, ProductoIngrediente
 
@@ -16,6 +17,10 @@ class Producto(SQLModel, table=True):
         default=None, max_length=500, description="Descripción del producto"
     )
     precio: float = Field(gt=0, description="Precio del producto")
+
+    # Campos de auditoría
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default=None)
 
     # Relación N:N con Categoria
     categorias: List["Categoria"] = Relationship(

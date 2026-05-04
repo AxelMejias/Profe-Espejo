@@ -1,4 +1,5 @@
 from typing import Optional, List, TYPE_CHECKING
+from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
 from app.models.links import ProductoIngrediente
 
@@ -14,6 +15,10 @@ class Ingrediente(SQLModel, table=True):
     unidad_medida: str = Field(
         min_length=1, max_length=50, description="Unidad de medida (kg, g, ml, unidad, etc.)"
     )
+
+    # Campos de auditoría
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default=None)
 
     # Relación N:N con Producto
     productos: List["Producto"] = Relationship(
