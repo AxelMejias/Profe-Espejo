@@ -1,0 +1,1 @@
+"""Schemas de pedidos — placeholder."""

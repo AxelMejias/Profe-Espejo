@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+psycopg2-binary
+python-dotenv
+bcrypt
+python-jose[cryptography]
+pydantic-settings
+email-validator
+slowapi
+alembic
+openpyxl
+google-auth
+httpx
+requests

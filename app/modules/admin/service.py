@@ -1,0 +1,1 @@
+"""Service de admin — placeholder."""
