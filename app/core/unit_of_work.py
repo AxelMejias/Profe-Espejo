@@ -30,10 +30,16 @@ class UnitOfWork:
         from app.modules.ingredientes.repository import IngredienteRepository
         from app.modules.productos.repository import ProductoRepository
 
-        # Módulos stub (se completarán en sprints siguientes)
-        from app.modules.pedidos.repository import PedidoRepository
-        from app.modules.pagos.repository import PagoRepository
+        # Módulos implementados en Parcial 2
+        from app.modules.pedidos.repository import (
+            PedidoRepository,
+            EstadoPedidoRepository,
+            FormaPagoRepository,
+        )
         from app.modules.direcciones.repository import DireccionRepository
+
+        # Stubs (excluidos por restricción del Parcial 2)
+        from app.modules.pagos.repository import PagoRepository
         from app.modules.usuarios.repository import UsuarioAdminRepository
 
         self.usuarios = UsuarioRepository(self.session)
@@ -45,8 +51,11 @@ class UnitOfWork:
         self.productos = ProductoRepository(self.session)
 
         self.pedidos = PedidoRepository(self.session)
-        self.pagos = PagoRepository(self.session)
+        self.estados_pedido = EstadoPedidoRepository(self.session)
+        self.formas_pago = FormaPagoRepository(self.session)
         self.direcciones = DireccionRepository(self.session)
+
+        self.pagos = PagoRepository(self.session)
         self.usuarios_admin = UsuarioAdminRepository(self.session)
 
         return self
