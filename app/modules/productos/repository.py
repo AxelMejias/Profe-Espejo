@@ -105,6 +105,14 @@ class ProductoRepository(BaseRepository[Producto]):
         offset = (page - 1) * size
         items = list(self.session.exec(query.offset(offset).limit(size)).all())
         return items, total
+    
+    def get_by_id_inactivo(self, producto_id: int) -> Optional[Producto]:
+        return self.session.exec(
+            select(Producto).where(
+                Producto.id == producto_id,
+                Producto.deleted_at != None,
+        )
+    ).first()
 
     def delete_ingrediente_links(self, producto_id: int) -> None:
         for pi in self.session.exec(

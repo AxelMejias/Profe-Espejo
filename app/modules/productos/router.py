@@ -70,7 +70,14 @@ def actualizar_producto(
 ):
     with UnitOfWork() as uow:
         return service.update(uow, producto_id, data)
-
+    
+@router.patch("/reactivar/{producto_id}", response_model=ProductoResponse, summary="Reactivar producto inactivo")
+def reactivar_producto(
+    producto_id: Annotated[int, Path(ge=1)],
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.reactivar(uow, producto_id)
 
 @router.patch("/{producto_id}/disponibilidad", response_model=ProductoResponse, summary="Toggle disponibilidad")
 def toggle_disponibilidad(

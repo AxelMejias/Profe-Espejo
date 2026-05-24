@@ -120,3 +120,13 @@ def delete(uow, producto_id: int) -> None:
     if not producto:
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
     uow.productos.soft_delete(producto)
+
+def reactivar(uow, producto_id: int) -> ProductoResponse:
+    producto = uow.productos.get_by_id_inactivo(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+    producto.deleted_at = None
+    producto.disponible = True
+    producto.updated_at = datetime.utcnow()
+    uow.productos.add(producto)
+    return _build_response(uow, producto)
