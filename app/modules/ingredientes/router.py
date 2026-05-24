@@ -54,6 +54,25 @@ def listar_ingredientes(
     with UnitOfWork() as uow:
         return service.get_all(uow, nombre=nombre, es_alergeno=es_alergeno,
                                unidad_medida=unidad_medida, page=page, size=size)
+    
+@router.get(
+    "/inactivos",
+    response_model=PaginatedIngredientes,
+    summary="Listar ingredientes dados de baja (soft delete)",
+)
+def listar_ingredientes_inactivos(
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        items, total = uow.ingredientes.get_all_inactivos(page=page, size=size)
+        import math
+        return PaginatedIngredientes(
+            items=[IngredienteResponse.model_validate(i) for i in items],
+            total=total, page=page, size=size,
+            pages=math.ceil(total / size) if total else 0,
+        )
 
 
 @router.get("/{ingrediente_id}", response_model=IngredienteResponse, summary="Obtener ingrediente por ID")

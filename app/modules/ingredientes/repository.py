@@ -58,6 +58,18 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
                 select(Ingrediente).where(Ingrediente.deleted_at == None)
             ).all()
         )
+    
+    def get_all_inactivos(
+        self,
+        page: int = 1,
+        size: int = 20,
+    ) -> Tuple[List[Ingrediente], int]:
+        query = select(Ingrediente).where(Ingrediente.deleted_at != None)
+        total = len(self.session.exec(query).all())
+        offset = (page - 1) * size
+        items = list(self.session.exec(query.offset(offset).limit(size)).all())
+        return items, total
+    
 
     def soft_delete(self, ingrediente: Ingrediente) -> None:
         from datetime import datetime
