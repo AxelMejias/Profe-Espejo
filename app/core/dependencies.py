@@ -1,10 +1,11 @@
 from datetime import datetime
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from app.core.security import decode_access_token
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def _problem(code: str, detail: str, status_code: int):
@@ -15,10 +16,30 @@ def _problem(code: str, detail: str, status_code: int):
 
 
 def get_current_user_payload(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> dict:
+    """
+    Estrategia dual:
+    1. Busca el JWT en la cookie HTTPOnly 'access_token' (módulo Admin).
+    2. Si no hay cookie, busca el header Authorization: Bearer (módulo Store).
+    Lanza 401 si no encuentra ninguno o el token es inválido.
+    """
+    token: Optional[str] = None
+
+    # 1️⃣ Cookie HTTPOnly (prioridad — más seguro)
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        token = cookie_token
+    # 2️⃣ Fallback: Authorization header
+    elif credentials and credentials.credentials:
+        token = credentials.credentials
+
+    if not token:
+        _problem("NOT_AUTHENTICATED", "No autenticado", status.HTTP_401_UNAUTHORIZED)
+
     try:
-        return decode_access_token(credentials.credentials)
+        return decode_access_token(token)
     except JWTError:
         _problem("INVALID_TOKEN", "Token inválido o expirado", status.HTTP_401_UNAUTHORIZED)
 

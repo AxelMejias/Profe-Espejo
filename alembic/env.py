@@ -3,13 +3,16 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 from alembic import context
 
-# ── Importar TODOS los modelos para que Alembic los detecte ───────────────────
-from app.core.links import ProductoCategoria, ProductoIngrediente          # noqa
-from app.modules.auth.model import Usuario, Rol, UsuarioRol, RefreshToken, PasswordResetToken  # noqa
-from app.modules.categorias.model import Categoria                         # noqa
-from app.modules.ingredientes.model import Ingrediente                     # noqa
-from app.modules.productos.model import Producto                           # noqa
-# Agregar aquí los modelos de pedidos, pagos, etc. cuando se implementen
+# modelos
+from app.core.links import ProductoCategoria, ProductoIngrediente          
+from app.modules.auth.model import Usuario, Rol, UsuarioRol, RefreshToken, PasswordResetToken  
+from app.modules.categorias.model import Categoria                         
+from app.modules.ingredientes.model import Ingrediente                     
+from app.modules.productos.model import Producto                           
+from app.modules.direcciones.model import DireccionEntrega                 
+from app.modules.pedidos.model import (                                    
+    EstadoPedido, FormaPago, Pedido, DetallePedido, HistorialEstadoPedido,
+)
 
 from app.core.config import settings
 

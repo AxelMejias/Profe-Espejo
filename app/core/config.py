@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     N8N_WEBHOOK_URL: str = "https://akcel11.app.n8n.cloud/webhook/food-store-reset"
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Cookie config
+    # En producción: True (requiere HTTPS). En desarrollo: False.
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
+    COOKIE_DOMAIN: str | None = None
+
     class Config:
         env_file = ".env"
 
