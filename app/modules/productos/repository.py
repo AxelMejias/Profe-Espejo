@@ -95,6 +95,17 @@ class ProductoRepository(BaseRepository[Producto]):
         ).all():
             self.session.delete(pc)
 
+    def get_all_inactivos(
+        self,
+        page: int = 1,
+        size: int = 20,
+    ) -> Tuple[List[Producto], int]:
+        query = select(Producto).where(Producto.deleted_at != None)
+        total = len(self.session.exec(query).all())
+        offset = (page - 1) * size
+        items = list(self.session.exec(query.offset(offset).limit(size)).all())
+        return items, total
+
     def delete_ingrediente_links(self, producto_id: int) -> None:
         for pi in self.session.exec(
             select(ProductoIngrediente).where(ProductoIngrediente.producto_id == producto_id)

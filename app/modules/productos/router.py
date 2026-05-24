@@ -1,4 +1,5 @@
 from typing import Annotated, Optional
+import math
 from fastapi import APIRouter, Depends, Query, Path, Body, status
 
 from app.modules.productos.schemas import (
@@ -8,7 +9,6 @@ from app.modules.productos import service
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
 
-# ✅ Prefix correcto: /api/v1/productos
 router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 
 _PUBLICO = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
@@ -17,13 +17,13 @@ _ADMIN   = Depends(require_role(["ADMIN", "STOCK"]))
 
 @router.get("/", summary="Listar productos")
 def listar_productos(
-    nombre:       Annotated[Optional[str],   Query(max_length=100)] = None,
-    precio_min:   Annotated[Optional[float], Query(ge=0)]           = None,
-    precio_max:   Annotated[Optional[float], Query(ge=0)]           = None,
-    categoria_id: Annotated[Optional[int],   Query(ge=1)]           = None,
-    solo_disponibles: Annotated[bool, Query()]                      = True,
-    page:         Annotated[int, Query(ge=1)]                       = 1,
-    size:         Annotated[int, Query(ge=1, le=100)]               = 20,
+    nombre:           Annotated[Optional[str],   Query(max_length=100)] = None,
+    precio_min:       Annotated[Optional[float], Query(ge=0)]           = None,
+    precio_max:       Annotated[Optional[float], Query(ge=0)]           = None,
+    categoria_id:     Annotated[Optional[int],   Query(ge=1)]           = None,
+    solo_disponibles: Annotated[bool, Query()]                          = True,
+    page:             Annotated[int, Query(ge=1)]                       = 1,
+    size:             Annotated[int, Query(ge=1, le=100)]               = 20,
     _=_PUBLICO,
 ):
     with UnitOfWork() as uow:
@@ -32,6 +32,22 @@ def listar_productos(
             categoria_id=categoria_id, solo_disponibles=solo_disponibles,
             page=page, size=size,
         )
+
+
+# ⚠️ /inactivos ANTES de /{producto_id} — orden crítico en FastAPI
+@router.get("/inactivos", summary="Listar productos inactivos (soft delete)")
+def listar_productos_inactivos(
+    page: Annotated[int, Query(ge=1)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        items, total = uow.productos.get_all_inactivos(page=page, size=size)
+        return {
+            "items": [ProductoListItem.model_validate(p) for p in items],
+            "total": total, "page": page, "size": size,
+            "pages": math.ceil(total / size) if total else 0,
+        }
 
 
 @router.get("/{producto_id}", response_model=ProductoResponse, summary="Obtener producto por ID")
