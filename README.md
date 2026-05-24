@@ -2,6 +2,15 @@
 
 API REST construida con **FastAPI + SQLModel + PostgreSQL** siguiendo una arquitectura **feature-first** con capas estrictas.
 
+## Repositorios del proyecto
+
+Este proyecto sigue una arquitectura **polyrepo**: cada capa tiene su propio repositorio independiente.
+
+| Capa | Repositorio | Rama |
+|---|---|---|
+| 🔧 Backend (este repo) | [AxelMejias/Profe-Espejo](https://github.com/AxelMejias/Profe-Espejo) | `FoodStoreBack` |
+| 🌐 Frontend | [AxelMejias/Prgo-4-Magni](https://github.com/AxelMejias/Prgo-4-Magni) | `Integrador` |
+
 ---
 
 ## Stack tecnológico
