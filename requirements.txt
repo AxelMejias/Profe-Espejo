@@ -13,3 +13,7 @@ openpyxl
 google-auth
 httpx
 requests
+
+# Testing
+pytest
+pytest-cov
