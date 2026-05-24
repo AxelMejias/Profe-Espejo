@@ -273,6 +273,45 @@ Editables en `app/core/config.py` o mediante un archivo `.env`:
 
 ---
 
+## Tests
+
+El proyecto usa **pytest** con mocks (sin base de datos real). Los servicios reciben el `UnitOfWork` como parámetro, lo que los hace completamente testeables de forma aislada.
+
+### Cobertura
+
+| Archivo de test | Módulo | Tests |
+|---|---|---|
+| `test_security.py` | `app/core/security.py` | hash, verify, JWT encode/decode |
+| `test_auth_service.py` | `app/modules/auth/service.py` | login, registro, webhook n8n |
+| `test_admin_service.py` | `app/modules/admin/service.py` | CRUD usuarios + asignar/remover rol |
+| `test_categorias_service.py` | `app/modules/categorias/service.py` | CRUD + subcategorías + conflictos |
+| `test_ingredientes_service.py` | `app/modules/ingredientes/service.py` | CRUD + alérgenos + conflictos |
+| `test_productos_service.py` | `app/modules/productos/service.py` | CRUD + categorías/ingredientes + disponibilidad + reactivar |
+| `test_direcciones_service.py` | `app/modules/direcciones/service.py` | CRUD + marcar principal + ownership |
+| `test_pedidos_service.py` | `app/modules/pedidos/service.py` | crear pedido + FSM de estados + RBAC |
+
+### Correr los tests
+
+```bash
+# Activar entorno virtual primero
+.venv\Scripts\Activate.ps1          # Windows
+source .venv/bin/activate           # Mac / Linux
+
+# Correr todos los tests
+pytest
+
+# Con output detallado
+pytest -v
+
+# Un módulo específico
+pytest tests/test_productos_service.py -v
+
+# Con reporte de cobertura
+pytest --cov=app --cov-report=term-missing
+```
+
+---
+
 ## Comandos de referencia rápida
 
 ```bash
@@ -290,4 +329,4 @@ alembic current
 
 # Generar nueva migración
 alembic revision --autogenerate -m "descripcion"
-```.
+```
