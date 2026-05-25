@@ -98,10 +98,24 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoResponse:
     producto = uow.productos.get_by_id(producto_id)
     if not producto:
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
-    for key, value in data.model_dump(exclude_unset=True).items():
+    simple = data.model_dump(exclude_unset=True, exclude={"categoria_ids", "ingredientes"})
+    for key, value in simple.items():
         setattr(producto, key, value)
     producto.updated_at = datetime.utcnow()
     uow.productos.add(producto)
+    if data.categoria_ids is not None:
+        uow.productos.delete_categoria_links(producto_id)
+        for cat_id in data.categoria_ids:
+            if not uow.categorias.get_by_id(cat_id):
+                _problem("CATEGORIA_NOT_FOUND", f"Categoría {cat_id} no encontrada", status.HTTP_404_NOT_FOUND)
+            uow.productos.add_categoria_link(producto_id, cat_id)
+    if data.ingredientes is not None:
+        uow.productos.delete_ingrediente_links(producto_id)
+        for ing_input in data.ingredientes:
+            if not uow.ingredientes.get_by_id(ing_input.ingrediente_id):
+                _problem("INGREDIENTE_NOT_FOUND", f"Ingrediente {ing_input.ingrediente_id} no encontrado", status.HTTP_404_NOT_FOUND)
+            uow.productos.add_ingrediente_link(producto_id, ing_input.ingrediente_id, ing_input.cantidad)
+    uow.flush()
     return _build_response(uow, producto)
 
 
