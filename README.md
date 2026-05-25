@@ -114,7 +114,7 @@ alembic upgrade head
 uvicorn main:app --reload
 ```
 
-El seed (roles, estados, formas de pago y usuario admin) se ejecuta **automáticamente** al iniciar el servidor.
+El seed (roles, estados, formas de pago y cuentas de staff) se ejecuta **automáticamente** al iniciar el servidor.
 
 El backend queda disponible en:
 - API: http://localhost:8000
@@ -128,8 +128,11 @@ El backend queda disponible en:
 | Rol | Email | Contraseña |
 |---|---|---|
 | Administrador | admin@foodstore.com | Admin1234! |
+| Gestor de Pedidos (Cocina) | cocina@foodstore.com | Cocina1234! |
+| Gestor de Stock | stock@foodstore.com | Stock1234! |
 
 > Los usuarios que se registran desde el frontend reciben el rol `CLIENT` automáticamente.
+> Las tres cuentas de staff se crean automáticamente al correr el seed (idempotente).
 
 ---
 
@@ -219,7 +222,7 @@ PENDIENTE → CONFIRMADO → EN_PREP → EN_CAMINO → ENTREGADO
 - **Estrategia dual**: el backend acepta JWT desde cookie HTTPOnly o desde header `Authorization: Bearer` (compatible con ambos módulos frontend)
 - **bcrypt**: hash de contraseñas con cost factor ≥ 12
 - **JWT**: access token (30 min) + refresh token con rotación (7 días)
-- **Rate limiting**: 5 intentos de login cada 15 minutos por IP
+- **Rate limiting**: 60 intentos de login cada 15 minutos por IP
 - **CORS**: configurado con `allow_credentials=True`
 - **Soft Delete**: ninguna entidad se elimina físicamente
 
@@ -330,3 +333,27 @@ alembic current
 # Generar nueva migración
 alembic revision --autogenerate -m "descripcion"
 ```
+
+---
+
+## Changelog
+
+### 24/05/2026 — Parcial 2
+
+**Bug fixes**
+
+| Archivo | Problema | Fix |
+|---|---|---|
+| `core/unit_of_work.py` | `uow.usuarios_admin` importaba el stub vacío de `modules/usuarios/repository.py` — todos los endpoints de `/api/v1/admin/usuarios` fallaban con `AttributeError` | Cambiada importación a `modules/admin/repository.py` donde está la implementación real |
+| `modules/pedidos/service.py` | `costo_envio` siempre era `$50` sin importar si el pedido era retiro o envío a domicilio | Ahora es `$0` cuando `direccion_id is None` (retiro en local) y `$50` solo cuando tiene dirección de entrega |
+| `modules/auth/router.py` | Rate limit de `5/15min` bloqueaba al mismo desarrollador al probar múltiples cuentas desde la misma IP | Aumentado a `60/15min` |
+
+**Nuevas funcionalidades**
+
+- `modules/admin/`: el panel de administración de usuarios ya estaba implementado en el backend (endpoints `GET/PUT/DELETE /api/v1/admin/usuarios`, `POST/DELETE /api/v1/admin/usuarios/{id}/roles`) pero la importación rota en el UoW los dejaba inutilizables — con el fix del UoW quedaron completamente operativos
+
+**Seed actualizado** (`app/db/seed.py`)
+
+- Agregadas funciones `_seed_cocina()` y `_seed_stock()` — crean automáticamente las cuentas de staff al iniciar el proyecto por primera vez
+- Corregida descripción de forma de pago: `"Efectivo (retiro en local)"` → `"Efectivo"`
+- El seed es completamente idempotente: si las cuentas ya existen no hace nada ni tira error
