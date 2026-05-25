@@ -94,6 +94,7 @@ class ProductoRepository(BaseRepository[Producto]):
             select(ProductoCategoria).where(ProductoCategoria.producto_id == producto_id)
         ).all():
             self.session.delete(pc)
+        self.session.flush()
 
     def get_all_inactivos(
         self,
@@ -119,6 +120,7 @@ class ProductoRepository(BaseRepository[Producto]):
             select(ProductoIngrediente).where(ProductoIngrediente.producto_id == producto_id)
         ).all():
             self.session.delete(pi)
+        self.session.flush()
 
     def soft_delete(self, producto: Producto) -> None:
         producto.deleted_at = datetime.utcnow()

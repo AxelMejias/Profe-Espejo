@@ -43,6 +43,8 @@ class ProductoUpdate(BaseModel):
     precio: Optional[Decimal] = Field(default=None, gt=0, decimal_places=2)
     stock_cantidad: Optional[int] = Field(default=None, ge=0)
     disponible: Optional[bool] = None
+    categoria_ids: Optional[List[int]] = None
+    ingredientes: Optional[List[IngredienteInput]] = None
 
 
 class ProductoListItem(BaseModel):
