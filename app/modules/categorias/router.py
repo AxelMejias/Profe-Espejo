@@ -9,7 +9,7 @@ from app.core.unit_of_work import UnitOfWork
 router = APIRouter(prefix="/api/v1/categorias", tags=["Categorías"])
 
 # Roles que pueden leer (público funciona también, pero requerimos al menos login)
-_LEER  = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+_LEER  = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN = Depends(require_role(["ADMIN", "STOCK"]))
 
 

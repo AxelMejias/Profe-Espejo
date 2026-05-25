@@ -11,7 +11,7 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 
-_PUBLICO = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+_PUBLICO = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN   = Depends(require_role(["ADMIN", "STOCK"]))
 
 
@@ -71,7 +71,7 @@ def actualizar_producto(
     with UnitOfWork() as uow:
         return service.update(uow, producto_id, data)
     
-@router.patch("/reactivar/{producto_id}", response_model=ProductoResponse, summary="Reactivar producto inactivo")
+@router.patch("/{producto_id}/reactivar", response_model=ProductoResponse, summary="Reactivar producto inactivo")
 def reactivar_producto(
     producto_id: Annotated[int, Path(ge=1)],
     _=_ADMIN,

@@ -80,5 +80,15 @@ def delete(uow, ingrediente_id: int) -> None:
     uow.ingredientes.soft_delete(ingrediente)
 
 
+def reactivar(uow, ingrediente_id: int) -> IngredienteResponse:
+    ingrediente = uow.ingredientes.get_by_id_inactivo(ingrediente_id)
+    if not ingrediente:
+        _problem("INGREDIENTE_NOT_FOUND", f"Ingrediente {ingrediente_id} no encontrado o ya está activo", status.HTTP_404_NOT_FOUND)
+    ingrediente.deleted_at = None
+    ingrediente.updated_at = datetime.utcnow()
+    uow.ingredientes.add(ingrediente)
+    return IngredienteResponse.model_validate(ingrediente)
+
+
 def get_all_activos_for_export(uow) -> list[IngredienteResponse]:
     return [IngredienteResponse.model_validate(i) for i in uow.ingredientes.get_all_activos()]

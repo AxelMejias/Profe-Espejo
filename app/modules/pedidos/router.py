@@ -15,8 +15,8 @@ from app.core.unit_of_work import UnitOfWork
 router = APIRouter(prefix="/api/v1/pedidos", tags=["Pedidos"])
 
 # Aliases RBAC siguiendo la convención del codebase
-_AUTENTICADO = Depends(require_role(["ADMIN", "PEDIDOS", "CLIENT", "STOCK"]))
-_STAFF       = Depends(require_role(["ADMIN", "PEDIDOS"]))
+_AUTENTICADO = Depends(require_role(["ADMIN", "COCINERO", "CLIENT", "STOCK"]))
+_STAFF       = Depends(require_role(["ADMIN", "COCINERO"]))
 _CLIENT      = Depends(require_role(["CLIENT"]))
 
 
@@ -49,7 +49,7 @@ def listar_pedidos(
 ):
     """
     CLIENT ⇒ solo ve sus pedidos.
-    ADMIN / PEDIDOS ⇒ ven todos.
+    ADMIN / COCINERO ⇒ ven todos.
     El filtrado lo hace el service según el payload del JWT.
     """
     with UnitOfWork() as uow:
@@ -107,12 +107,12 @@ def crear_pedido(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FSM — avanzar estado (ADMIN / PEDIDOS)
+# FSM — avanzar estado (ADMIN / COCINERO)
 # El router solo desempaqueta el body; la validación es 100% del service.
 # ──────────────────────────────────────────────────────────────────────────────
 
 @router.post("/{pedido_id}/avanzar", response_model=PedidoResponse,
-             summary="Avanzar estado del pedido (ADMIN / PEDIDOS)")
+             summary="Avanzar estado del pedido (ADMIN / COCINERO)")
 def avanzar_estado(
     pedido_id: Annotated[int, Path(ge=1)],
     data: AvanzarEstadoRequest,

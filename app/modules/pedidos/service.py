@@ -36,7 +36,7 @@ from app.modules.pedidos.schemas import (
 _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
     "PENDIENTE":  {"CONFIRMADO", "CANCELADO"},
     "CONFIRMADO": {"EN_PREP",    "CANCELADO"},
-    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},  # CANCELADO desde aquí: solo ADMIN/PEDIDOS
+    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},  # CANCELADO desde aquí: solo ADMIN/COCINERO
     "EN_CAMINO":  {"ENTREGADO"},
     "ENTREGADO":  set(),                         # terminal
     "CANCELADO":  set(),                         # terminal
@@ -113,9 +113,9 @@ def get_all(
 ) -> PaginatedPedidos:
     """
     CLIENT ⇒ solo ve sus pedidos.
-    ADMIN / PEDIDOS ⇒ ven todos.
+    ADMIN / COCINERO ⇒ ven todos.
     """
-    es_staff = any(r in ("ADMIN", "PEDIDOS") for r in requester_roles)
+    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
     items, total = uow.pedidos.get_all(
         usuario_id=None if es_staff else requester_user_id,
         estado_codigo=estado_codigo,
@@ -134,7 +134,7 @@ def get_by_id(
     requester_user_id: int,
     requester_roles: list[str],
 ) -> PedidoResponse:
-    es_staff = any(r in ("ADMIN", "PEDIDOS") for r in requester_roles)
+    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
     pedido = (
         uow.pedidos.get_by_id(pedido_id)
         if es_staff else
@@ -152,7 +152,7 @@ def get_historial(
     requester_roles: list[str],
 ) -> list[HistorialEstadoResponse]:
     # Reutiliza el check de acceso de get_by_id
-    es_staff = any(r in ("ADMIN", "PEDIDOS") for r in requester_roles)
+    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
     pedido = (
         uow.pedidos.get_by_id(pedido_id)
         if es_staff else
@@ -285,7 +285,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Avanzar estado (ADMIN / PEDIDOS) — núcleo de la máquina de estados
+# Avanzar estado (ADMIN / COCINERO) — núcleo de la máquina de estados
 # ──────────────────────────────────────────────────────────────────────────────
 
 def avanzar_estado(
@@ -333,13 +333,13 @@ def avanzar_estado(
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
 
-    # Permisos: ADMIN puede todo; PEDIDOS puede avanzar el flujo principal
+    # Permisos: ADMIN puede todo; COCINERO puede avanzar el flujo principal
     # (CONFIRMADO → EN_PREP → EN_CAMINO → ENTREGADO) y cancelar.
-    es_admin   = "ADMIN" in actor_roles
-    es_pedidos = "PEDIDOS" in actor_roles
-    if not (es_admin or es_pedidos):
+    es_admin    = "ADMIN" in actor_roles
+    es_cocinero = "COCINERO" in actor_roles
+    if not (es_admin or es_cocinero):
         _problem("FORBIDDEN",
-                 "Solo ADMIN o PEDIDOS pueden avanzar el estado de un pedido",
+                 "Solo ADMIN o COCINERO pueden avanzar el estado de un pedido",
                  status.HTTP_403_FORBIDDEN)
 
     # Aplicar transición + audit trail (mismo UoW = misma transacción)

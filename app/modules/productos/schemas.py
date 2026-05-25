@@ -32,7 +32,7 @@ class ProductoCreate(BaseModel):
     descripcion: Optional[str] = Field(default=None, max_length=500)
     precio: Decimal = Field(gt=0, decimal_places=2)
     stock_cantidad: int = Field(default=0, ge=0)
-    disponible: bool = Field(default=True)
+    disponible: bool = Field(default=False)
     categoria_ids: List[int] = Field(default_factory=list)
     ingredientes: List[IngredienteInput] = Field(default_factory=list)
 
