@@ -4,14 +4,14 @@ from pydantic import BaseModel, Field
 
 
 class IngredienteCreate(BaseModel):
-    nombre: str = Field(min_length=2, max_length=100)
+    nombre: str = Field(min_length=3, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
     unidad_medida: str = Field(min_length=1, max_length=50)
     es_alergeno: bool = False
 
 
 class IngredienteUpdate(BaseModel):
-    nombre: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    nombre: Optional[str] = Field(default=None, min_length=3, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
     unidad_medida: Optional[str] = Field(default=None, min_length=1, max_length=50)
     es_alergeno: Optional[bool] = None
