@@ -71,6 +71,14 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
         return items, total
     
 
+    def get_by_id_inactivo(self, ingrediente_id: int) -> Optional[Ingrediente]:
+        return self.session.exec(
+            select(Ingrediente).where(
+                Ingrediente.id == ingrediente_id,
+                Ingrediente.deleted_at != None,
+            )
+        ).first()
+
     def soft_delete(self, ingrediente: Ingrediente) -> None:
         from datetime import datetime
         ingrediente.deleted_at = datetime.utcnow()

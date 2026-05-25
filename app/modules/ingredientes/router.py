@@ -13,7 +13,7 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/ingredientes", tags=["Ingredientes"])
 
-_LEER  = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+_LEER  = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN = Depends(require_role(["ADMIN", "STOCK"]))
 
 
@@ -95,6 +95,12 @@ def actualizar_ingrediente(
 ):
     with UnitOfWork() as uow:
         return service.update(uow, ingrediente_id, data)
+
+
+@router.patch("/{ingrediente_id}/reactivar", response_model=IngredienteResponse, summary="Reactivar ingrediente dado de baja")
+def reactivar_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+    with UnitOfWork() as uow:
+        return service.reactivar(uow, ingrediente_id)
 
 
 @router.delete("/{ingrediente_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de ingrediente")
