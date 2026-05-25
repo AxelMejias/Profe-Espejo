@@ -48,7 +48,7 @@ def get_by_id(uow, ingrediente_id: int) -> IngredienteResponse:
 
 
 def create(uow, data: IngredienteCreate) -> IngredienteResponse:
-    if uow.ingredientes.get_by_nombre_any(data.nombre):
+    if uow.ingredientes.get_by_nombre(data.nombre):
         _problem("NOMBRE_CONFLICT", f"Ya existe un ingrediente '{data.nombre}'", status.HTTP_409_CONFLICT)
     try:
         ingrediente = Ingrediente(**data.model_dump())
@@ -64,7 +64,7 @@ def update(uow, ingrediente_id: int, data: IngredienteUpdate) -> IngredienteResp
         _problem("INGREDIENTE_NOT_FOUND", f"Ingrediente {ingrediente_id} no encontrado", status.HTTP_404_NOT_FOUND)
     changes = data.model_dump(exclude_unset=True)
     if "nombre" in changes and changes["nombre"] != ingrediente.nombre:
-        if uow.ingredientes.get_by_nombre_any(changes["nombre"]):
+        if uow.ingredientes.get_by_nombre(changes["nombre"]):
             _problem("NOMBRE_CONFLICT", f"Ya existe un ingrediente '{changes['nombre']}'", status.HTTP_409_CONFLICT)
     for key, value in changes.items():
         setattr(ingrediente, key, value)

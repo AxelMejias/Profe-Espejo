@@ -24,7 +24,7 @@ class Producto(SQLModel, table=True):
 
     # Stock y disponibilidad (spec: RN-CA04, RN-CA05)
     stock_cantidad: int = Field(default=0, ge=0, description="Unidades disponibles en stock")
-    disponible: bool = Field(default=True, description="Toggle manual de disponibilidad")
+    disponible: bool = Field(default=False, description="Toggle manual de disponibilidad")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)

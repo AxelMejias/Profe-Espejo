@@ -11,7 +11,7 @@ class Ingrediente(SQLModel, table=True):
     __tablename__ = "ingrediente"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    nombre: str = Field(min_length=2, max_length=100, unique=True)
+    nombre: str = Field(min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
     unidad_medida: str = Field(min_length=1, max_length=50)
     es_alergeno: bool = Field(default=False)
