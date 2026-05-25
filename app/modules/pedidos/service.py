@@ -251,7 +251,8 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 
     # 5. Calcular totales y persistir Pedido
     descuento = Decimal("0.00")
-    total = subtotal - descuento + _COSTO_ENVIO_DEFAULT
+    costo_envio = _COSTO_ENVIO_DEFAULT if data.direccion_id is not None else Decimal("0.00")
+    total = subtotal - descuento + costo_envio
 
     pedido = Pedido(
         usuario_id=usuario_id,
@@ -260,7 +261,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
         forma_pago_codigo=data.forma_pago_codigo,
         subtotal=subtotal,
         descuento=descuento,
-        costo_envio=_COSTO_ENVIO_DEFAULT,
+        costo_envio=costo_envio,
         total=total,
         notas=data.notas,
     )

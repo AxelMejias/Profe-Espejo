@@ -40,7 +40,7 @@ class UnitOfWork:
 
         # Stubs (excluidos por restricción del Parcial 2)
         from app.modules.pagos.repository import PagoRepository
-        from app.modules.usuarios.repository import UsuarioAdminRepository
+        from app.modules.admin.repository import UsuarioAdminRepository
 
         self.usuarios = UsuarioRepository(self.session)
         self.refresh_tokens = RefreshTokenRepository(self.session)

@@ -13,6 +13,8 @@ def seed():
         _seed_estados_pedido(session)
         _seed_formas_pago(session)
         _seed_admin(session)
+        _seed_cocina(session)
+        _seed_stock(session)
         print("Seed completado.")
 
 
@@ -48,7 +50,7 @@ def _seed_formas_pago(session: Session):
     # Nota: la lógica funcional de MercadoPago está fuera de alcance (Parcial 2).
     # La tabla existe a nivel estructura para respetar el diagrama UML.
     formas = [
-        FormaPago(codigo="EFECTIVO",     descripcion="Efectivo (retiro en local)", habilitado=True),
+        FormaPago(codigo="EFECTIVO",     descripcion="Efectivo",                  habilitado=True),
         FormaPago(codigo="TRANSFERENCIA", descripcion="Transferencia bancaria",     habilitado=True),
         FormaPago(codigo="MERCADOPAGO",  descripcion="MercadoPago",                habilitado=False),
     ]
@@ -70,6 +72,36 @@ def _seed_admin(session: Session):
     session.add(admin)
     session.flush()
     session.add(UsuarioRol(usuario_id=admin.id, rol_codigo="ADMIN"))
+    session.commit()
+
+
+def _seed_cocina(session: Session):
+    if session.exec(select(Usuario).where(Usuario.email == "cocina@foodstore.com")).first():
+        return
+    cocina = Usuario(
+        nombre="Carlos",
+        apellido="Cocina",
+        email="cocina@foodstore.com",
+        password_hash=hash_password("Cocina1234!"),
+    )
+    session.add(cocina)
+    session.flush()
+    session.add(UsuarioRol(usuario_id=cocina.id, rol_codigo="PEDIDOS"))
+    session.commit()
+
+
+def _seed_stock(session: Session):
+    if session.exec(select(Usuario).where(Usuario.email == "stock@foodstore.com")).first():
+        return
+    stock = Usuario(
+        nombre="Laura",
+        apellido="Stock",
+        email="stock@foodstore.com",
+        password_hash=hash_password("Stock1234!"),
+    )
+    session.add(stock)
+    session.flush()
+    session.add(UsuarioRol(usuario_id=stock.id, rol_codigo="STOCK"))
     session.commit()
 
 
