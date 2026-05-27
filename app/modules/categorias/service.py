@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 
 from app.modules.categorias.model import Categoria
 from app.modules.categorias.schemas import (
-    CategoriaCreate, CategoriaUpdate, CategoriaRead, PaginatedCategorias,
+    CategoriaCreate, CategoriaUpdate, CategoriaRead, PaginatedCategorias, CategoriaTree,
 )
 
 
