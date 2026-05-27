@@ -84,8 +84,25 @@ def _calcular_precio(insumos: list[Ingrediente], cantidades: dict[int, Decimal],
 
 #CRUD
 
-def get_all(uow, nombre: Optional[str] = None, page: int = 1, size: int = 20) -> PaginatedProductos:
-    items, total = uow.productos.get_all(nombre=nombre, page=page, size=size)
+def get_all(
+    uow,
+    nombre: Optional[str] = None,
+    precio_min: Optional[float] = None,
+    precio_max: Optional[float] = None,
+    categoria_id: Optional[int] = None,
+    solo_disponibles: bool = True,
+    page: int = 1,
+    size: int = 20,
+) -> PaginatedProductos:
+    items, total = uow.productos.get_all(
+        nombre=nombre,
+        precio_min=precio_min,
+        precio_max=precio_max,
+        categoria_id=categoria_id,
+        solo_disponibles=solo_disponibles,
+        page=page,
+        size=size,
+    )
     return PaginatedProductos(
         items=[_build_response(uow, p) for p in items],
         total=total, page=page, size=size,
