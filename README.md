@@ -2,6 +2,23 @@
 
 API REST construida con **FastAPI + SQLModel + PostgreSQL** siguiendo una arquitectura **feature-first** con capas estrictas.
 
+> [!WARNING]
+> **⚠️ AVISO PARA LA CÁTEDRA **
+>
+> El tag [`parcial-2`](../../releases/tag/parcial-2) conserva el estado exacto
+> evaluado en el **Parcial 2**. Los commits realizados a partir de ese tag
+> responden a **cambios estructurales solicitados por la cátedra** para la
+> siguiente etapa e incluyen:
+>
+> - Rediseño del modelo de stock: migración de stock-por-producto a **stock-por-insumo**.
+> - Nuevo modelo `Insumo` (reemplaza a `Ingrediente`) con soporte para productos terminados como insumo.
+> - Tabla maestra-detalle `ProductoInsumo` con creación **transaccional** (Unit of Work).
+> - Árbol de `Categoria` **recursivo** con `parent_id` de profundidad ilimitada.
+> - Validación dinámica de **stock de insumos** en la creación de pedidos.
+>
+> Estos cambios **rompen compatibilidad** con la versión anterior de manera intencional
+> y acordada con la cátedra.
+
 ## Repositorios del proyecto
 
 Este proyecto sigue una arquitectura **polyrepo**: cada capa tiene su propio repositorio independiente.
