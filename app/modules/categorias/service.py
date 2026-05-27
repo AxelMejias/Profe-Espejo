@@ -71,3 +71,21 @@ def delete(uow, categoria_id: int) -> None:
     if not categoria:
         _problem("CATEGORIA_NOT_FOUND", f"Categoría {categoria_id} no encontrada", status.HTTP_404_NOT_FOUND)
     uow.categorias.soft_delete(categoria)
+
+def _build_tree(categoria: Categoria, todas: list[Categoria]) -> CategoriaTree:
+    """Construye recursivamente el nodo y sus hijos a partir de la lista plana."""
+    hijos = [c for c in todas if c.parent_id == categoria.id]
+    return CategoriaTree(
+        id=categoria.id,
+        nombre=categoria.nombre,
+        descripcion=categoria.descripcion,
+        parent_id=categoria.parent_id,
+        children=[_build_tree(h, todas) for h in hijos],
+    )
+
+
+def get_tree(uow) -> list[CategoriaTree]:
+    """Devuelve el árbol completo de categorías activas."""
+    todas, _ = uow.categorias.get_all(page=1, size=9999)
+    raices = [c for c in todas if c.parent_id is None]
+    return [_build_tree(r, todas) for r in raices]

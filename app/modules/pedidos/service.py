@@ -1,15 +1,6 @@
 """
 Service de Pedidos.
 Regla: NO crea su propio UoW. Recibe `uow` del router.
-
-Responsabilidades clave:
-- Validación del FSM (mapa _TRANSICIONES_VALIDAS) — ÚNICO lugar donde se valida.
-- Snapshot pattern al crear DetallePedido (nombre y precio inmutables).
-- Decremento de stock atómico dentro del mismo UoW (rollback si algo falla).
-- Append a HistorialEstadoPedido en cada transición (incluida la creación).
-- Enforcement de RN-02 (primer historial: estado_desde=NULL).
-- Enforcement de RN-05 (motivo obligatorio si estado_hacia=CANCELADO).
-- Control de permisos por rol según la transición solicitada.
 """
 import math
 from datetime import datetime
@@ -17,44 +8,34 @@ from decimal import Decimal
 from typing import Optional, Set
 from fastapi import HTTPException, status
 
-from app.modules.pedidos.model import (
-    Pedido, DetallePedido, HistorialEstadoPedido,
-)
+from app.modules.pedidos.model import Pedido, DetallePedido, HistorialEstadoPedido
 from app.modules.pedidos.schemas import (
     PedidoCreate, PedidoResponse, PedidoListItem, PaginatedPedidos,
     DetallePedidoResponse, HistorialEstadoResponse,
     EstadoPedidoResponse, FormaPagoResponse,
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
-# FSM — mapa de transiciones válidas (única fuente de verdad)
+# FSM
 # ──────────────────────────────────────────────────────────────────────────────
-# Lee así: desde estado X → cualquiera de estos estados Y es válido.
-# Cualquier transición fuera de este mapa lanza 409 INVALID_TRANSITION.
 
 _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
     "PENDIENTE":  {"CONFIRMADO", "CANCELADO"},
     "CONFIRMADO": {"EN_PREP",    "CANCELADO"},
-    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},  # CANCELADO desde aquí: solo ADMIN/COCINERO
+    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},
     "EN_CAMINO":  {"ENTREGADO"},
-    "ENTREGADO":  set(),                         # terminal
-    "CANCELADO":  set(),                         # terminal
+    "ENTREGADO":  set(),
+    "CANCELADO":  set(),
 }
 
-# Transiciones permitidas al rol CLIENT sobre su propio pedido.
-# El CLIENT solo puede cancelar (y solo desde PENDIENTE o CONFIRMADO).
 _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
     "PENDIENTE":  {"CANCELADO"},
     "CONFIRMADO": {"CANCELADO"},
 }
 
-# Costo de envío por default (RN: snapshot al crear el pedido)
 _COSTO_ENVIO_DEFAULT = Decimal("50.00")
-
-# Códigos de estado usados como constantes (evita typos)
-_ESTADO_PENDIENTE = "PENDIENTE"
-_ESTADO_CANCELADO = "CANCELADO"
+_ESTADO_PENDIENTE    = "PENDIENTE"
+_ESTADO_CANCELADO    = "CANCELADO"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -88,7 +69,7 @@ def _build_response(uow, pedido: Pedido) -> PedidoResponse:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Catálogos (para que el frontend pueble selects)
+# Catálogos
 # ──────────────────────────────────────────────────────────────────────────────
 
 def listar_estados(uow) -> list[EstadoPedidoResponse]:
@@ -111,10 +92,6 @@ def get_all(
     page: int = 1,
     size: int = 20,
 ) -> PaginatedPedidos:
-    """
-    CLIENT ⇒ solo ve sus pedidos.
-    ADMIN / COCINERO ⇒ ven todos.
-    """
     es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
     items, total = uow.pedidos.get_all(
         usuario_id=None if es_staff else requester_user_id,
@@ -151,7 +128,6 @@ def get_historial(
     requester_user_id: int,
     requester_roles: list[str],
 ) -> list[HistorialEstadoResponse]:
-    # Reutiliza el check de acceso de get_by_id
     es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
     pedido = (
         uow.pedidos.get_by_id(pedido_id)
@@ -160,30 +136,54 @@ def get_historial(
     )
     if not pedido:
         _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
-
     historial = uow.pedidos.get_historial(pedido_id)
     return [HistorialEstadoResponse.model_validate(h) for h in historial]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Crear pedido (transacción atómica vía UoW)
+# Crear pedido — validación de stock por INSUMO (Parcial 3)
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _calcular_requerimientos_insumos(
+    uow, items: list
+) -> dict[int, Decimal]:
+    """
+    Dado un listado de items del pedido, acumula cuántas unidades
+    de cada insumo se necesitan en total considerando todos los productos
+    y sus cantidades pedidas.
+    Retorna: { ingrediente_id: cantidad_total_requerida }
+    """
+    from sqlmodel import select
+    from app.core.links import ProductoIngrediente
+
+    requerido: dict[int, Decimal] = {}
+
+    for item in items:
+        links = list(uow.session.exec(
+            select(ProductoIngrediente).where(
+                ProductoIngrediente.producto_id == item.producto_id
+            )
+        ).all())
+        for link in links:
+            clave = link.ingrediente_id
+            cantidad = Decimal(str(link.cantidad)) * item.cantidad
+            requerido[clave] = requerido.get(clave, Decimal("0")) + cantidad
+
+    return requerido
+
 
 def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     """
-    Flujo atómico — si CUALQUIER paso falla, el UoW hace rollback de todo:
-
-    1. Validar forma_pago existe y está habilitada.
-    2. Validar dirección (si se envía) pertenece al usuario.
-    3. Para cada item:
-         a. Cargar producto (soft-delete-aware, disponible=true).
-         b. Validar stock_cantidad >= cantidad.
-         c. Snapshot: capturar nombre y precio actuales.
-         d. Decrementar stock_cantidad.
-    4. Calcular subtotal / total y persistir Pedido con estado=PENDIENTE.
-    5. Insertar todos los DetallePedido (con snapshot inmutable).
-    6. Insertar primer HistorialEstadoPedido (estado_desde=NULL — RN-02).
+    Flujo atómico:
+    1. Validar forma de pago y dirección.
+    2. Validar que cada producto existe y está disponible.
+    3. Calcular requerimientos de insumos agregados por todo el pedido.
+    4. Validar stock de insumos — si falta alguno lanza 422 con detalle.
+    5. Decrementar stock de los insumos involucrados.
+    6. Persistir Pedido + DetallePedido + HistorialEstadoPedido.
     """
+    from app.modules.ingredientes.model import Ingrediente
+
     # 1. Forma de pago
     forma_pago = uow.formas_pago.get_by_codigo(data.forma_pago_codigo)
     if not forma_pago:
@@ -195,21 +195,19 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
                  f"Forma de pago '{data.forma_pago_codigo}' está deshabilitada",
                  status.HTTP_409_CONFLICT)
 
-    # 2. Dirección (opcional — pedidos para retiro en local no la requieren)
+    # 2. Dirección
     if data.direccion_id is not None:
-        direccion = uow.direcciones.get_by_id_for_user(data.direccion_id, usuario_id)
-        if not direccion:
+        if not uow.direcciones.get_by_id_for_user(data.direccion_id, usuario_id):
             _problem("DIRECCION_NOT_FOUND",
                      f"Dirección {data.direccion_id} no encontrada para este usuario",
                      status.HTTP_404_NOT_FOUND)
 
-    # 3. Estado PENDIENTE debe existir en el catálogo (validación de integridad del seed)
     if not uow.estados_pedido.get_by_codigo(_ESTADO_PENDIENTE):
         _problem("ESTADO_NOT_FOUND",
                  "Catálogo de estados no inicializado (ejecutar seed)",
                  status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # 4. Procesar items: snapshot + decremento de stock
+    # 3. Validar productos y preparar snapshots
     detalles_a_insertar: list[DetallePedido] = []
     subtotal = Decimal("0.00")
 
@@ -223,15 +221,10 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
             _problem("PRODUCTO_NO_DISPONIBLE",
                      f"Producto '{producto.nombre}' no está disponible",
                      status.HTTP_409_CONFLICT)
-        if producto.stock_cantidad < item.cantidad:
-            _problem("STOCK_INSUFICIENTE",
-                     f"Stock insuficiente para '{producto.nombre}': "
-                     f"disponible {producto.stock_cantidad}, solicitado {item.cantidad}",
-                     status.HTTP_409_CONFLICT)
 
-        # ── Snapshot inmutable (RN-04) ───────────────────────────────────────
-        precio_snap = producto.precio
+        precio_snap   = producto.precio
         subtotal_item = precio_snap * item.cantidad
+        subtotal     += subtotal_item
 
         detalles_a_insertar.append(DetallePedido(
             producto_id=producto.id,
@@ -242,17 +235,45 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
             personalizacion=item.personalizacion,
         ))
 
-        # Decrementar stock (parte de la misma transacción)
-        producto.stock_cantidad -= item.cantidad
-        producto.updated_at = datetime.utcnow()
-        uow.productos.add(producto)
+    # 4. Calcular insumos requeridos y validar stock
+    requerido = _calcular_requerimientos_insumos(uow, data.items)
 
-        subtotal += subtotal_item
+    faltantes = []
+    for ing_id, cantidad_requerida in requerido.items():
+        ing: Ingrediente = uow.session.get(Ingrediente, ing_id)
+        if not ing or ing.stock_cantidad < cantidad_requerida:
+            stock_actual = ing.stock_cantidad if ing else Decimal("0")
+            faltantes.append({
+                "insumo_id":        ing_id,
+                "nombre":           ing.nombre if ing else f"Insumo #{ing_id}",
+                "unidad_medida":    ing.unidad_medida if ing else "",
+                "stock_actual":     float(stock_actual),
+                "stock_requerido":  float(cantidad_requerida),
+                "deficit":          float(stock_actual - cantidad_requerida),
+            })
 
-    # 5. Calcular totales y persistir Pedido
-    descuento = Decimal("0.00")
+    if faltantes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "detail":   "No hay stock suficiente para completar el pedido.",
+                "code":     "STOCK_INSUFICIENTE",
+                "faltantes": faltantes,
+            },
+        )
+
+    # 5. Decrementar stock de insumos
+    for ing_id, cantidad_requerida in requerido.items():
+        ing: Ingrediente = uow.session.get(Ingrediente, ing_id)
+        ing.stock_cantidad -= cantidad_requerida
+        ing.updated_at      = datetime.utcnow()
+        uow.session.add(ing)
+    uow.session.flush()
+
+    # 6. Persistir pedido
+    descuento   = Decimal("0.00")
     costo_envio = _COSTO_ENVIO_DEFAULT if data.direccion_id is not None else Decimal("0.00")
-    total = subtotal - descuento + costo_envio
+    total       = subtotal - descuento + costo_envio
 
     pedido = Pedido(
         usuario_id=usuario_id,
@@ -265,14 +286,12 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
         total=total,
         notas=data.notas,
     )
-    uow.pedidos.add(pedido)   # flush ⇒ pedido.id ya disponible
+    uow.pedidos.add(pedido)
 
-    # 6. Insertar detalles con el pedido_id recién generado
     for detalle in detalles_a_insertar:
         detalle.pedido_id = pedido.id
         uow.pedidos.add_detalle(detalle)
 
-    # 7. Primer historial — RN-02: estado_desde=NULL en la creación
     uow.pedidos.add_historial(HistorialEstadoPedido(
         pedido_id=pedido.id,
         estado_desde=None,
@@ -285,7 +304,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Avanzar estado (ADMIN / COCINERO) — núcleo de la máquina de estados
+# Avanzar estado
 # ──────────────────────────────────────────────────────────────────────────────
 
 def avanzar_estado(
@@ -296,28 +315,13 @@ def avanzar_estado(
     actor_user_id: int,
     actor_roles: list[str],
 ) -> PedidoResponse:
-    """
-    Validación 100% en service (NUNCA en router):
-    - El pedido existe y no está borrado.
-    - El estado_hacia existe en el catálogo.
-    - La transición desde el estado actual al estado_hacia es válida (FSM).
-    - El motivo es obligatorio si estado_hacia = CANCELADO (RN-05).
-    - El rol del actor tiene permiso para esta transición específica.
-
-    Operación atómica:
-    - UPDATE Pedido.estado_codigo
-    - INSERT HistorialEstadoPedido
-    Ambas viajan en la misma transacción del UoW. Si una falla, ambas se revierten.
-    """
     pedido = uow.pedidos.get_by_id(pedido_id)
     if not pedido:
         _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
 
-    # Validar destino existe en catálogo
     if not uow.estados_pedido.get_by_codigo(estado_hacia):
         _problem("ESTADO_NOT_FOUND", f"Estado '{estado_hacia}' no existe", status.HTTP_404_NOT_FOUND)
 
-    # Validar transición está en el mapa FSM
     transiciones_permitidas = _TRANSICIONES_VALIDAS.get(pedido.estado_codigo, set())
     if estado_hacia not in transiciones_permitidas:
         _problem(
@@ -327,25 +331,19 @@ def avanzar_estado(
             status.HTTP_409_CONFLICT,
         )
 
-    # RN-05: motivo obligatorio si se cancela
     if estado_hacia == _ESTADO_CANCELADO and not (motivo and motivo.strip()):
         _problem("MOTIVO_REQUIRED",
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
 
-    # Permisos: ADMIN puede todo; COCINERO puede avanzar el flujo principal
-    # (CONFIRMADO → EN_PREP → EN_CAMINO → ENTREGADO) y cancelar.
-    es_admin    = "ADMIN" in actor_roles
-    es_cocinero = "COCINERO" in actor_roles
-    if not (es_admin or es_cocinero):
+    if not ("ADMIN" in actor_roles or "COCINERO" in actor_roles):
         _problem("FORBIDDEN",
                  "Solo ADMIN o COCINERO pueden avanzar el estado de un pedido",
                  status.HTTP_403_FORBIDDEN)
 
-    # Aplicar transición + audit trail (mismo UoW = misma transacción)
-    estado_desde = pedido.estado_codigo
-    pedido.estado_codigo = estado_hacia
-    pedido.updated_at = datetime.utcnow()
+    estado_desde          = pedido.estado_codigo
+    pedido.estado_codigo  = estado_hacia
+    pedido.updated_at     = datetime.utcnow()
     uow.pedidos.add(pedido)
 
     uow.pedidos.add_historial(HistorialEstadoPedido(
@@ -360,7 +358,7 @@ def avanzar_estado(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Cancelar pedido (CLIENT sobre su propio pedido)
+# Cancelar pedido (CLIENT)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def cancelar_pedido_cliente(
@@ -369,13 +367,6 @@ def cancelar_pedido_cliente(
     motivo: str,
     cliente_user_id: int,
 ) -> PedidoResponse:
-    """
-    Variante para el rol CLIENT. Solo puede cancelar:
-    - sus propios pedidos
-    - desde estado PENDIENTE o CONFIRMADO
-
-    Reutiliza la misma lógica de avanzar_estado pero con permisos del CLIENT.
-    """
     pedido = uow.pedidos.get_by_id_for_user(pedido_id, cliente_user_id)
     if not pedido:
         _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
@@ -394,9 +385,9 @@ def cancelar_pedido_cliente(
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
 
-    estado_desde = pedido.estado_codigo
+    estado_desde         = pedido.estado_codigo
     pedido.estado_codigo = _ESTADO_CANCELADO
-    pedido.updated_at = datetime.utcnow()
+    pedido.updated_at    = datetime.utcnow()
     uow.pedidos.add(pedido)
 
     uow.pedidos.add_historial(HistorialEstadoPedido(

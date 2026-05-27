@@ -3,7 +3,7 @@ import math
 from fastapi import APIRouter, Depends, Query, Path, Body, status
 
 from app.modules.productos.schemas import (
-    ProductoCreate, ProductoUpdate, ProductoListItem, ProductoResponse,
+    ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos,
 )
 from app.modules.productos import service
 from app.core.dependencies import require_role
@@ -15,7 +15,7 @@ _PUBLICO = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN   = Depends(require_role(["ADMIN", "STOCK"]))
 
 
-@router.get("/", summary="Listar productos")
+@router.get("/", response_model=PaginatedProductos, summary="Listar productos")
 def listar_productos(
     nombre:           Annotated[Optional[str],   Query(max_length=100)] = None,
     precio_min:       Annotated[Optional[float], Query(ge=0)]           = None,
@@ -34,8 +34,7 @@ def listar_productos(
         )
 
 
-# ⚠️ /inactivos ANTES de /{producto_id} — orden crítico en FastAPI
-@router.get("/inactivos", summary="Listar productos inactivos (soft delete)")
+@router.get("/inactivos", response_model=PaginatedProductos, summary="Listar productos inactivos")
 def listar_productos_inactivos(
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -43,26 +42,26 @@ def listar_productos_inactivos(
 ):
     with UnitOfWork() as uow:
         items, total = uow.productos.get_all_inactivos(page=page, size=size)
-        return {
-            "items": [ProductoListItem.model_validate(p) for p in items],
-            "total": total, "page": page, "size": size,
-            "pages": math.ceil(total / size) if total else 0,
-        }
+        return PaginatedProductos(
+            items=[service._build_response(uow, p) for p in items],
+            total=total, page=page, size=size,
+            pages=math.ceil(total / size) if total else 0,
+        )
 
 
-@router.get("/{producto_id}", response_model=ProductoResponse, summary="Obtener producto por ID")
+@router.get("/{producto_id}", response_model=ProductoRead, summary="Obtener producto por ID")
 def obtener_producto(producto_id: Annotated[int, Path(ge=1)], _=_PUBLICO):
     with UnitOfWork() as uow:
         return service.get_by_id(uow, producto_id)
 
 
-@router.post("/", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED, summary="Crear producto")
+@router.post("/", response_model=ProductoRead, status_code=status.HTTP_201_CREATED, summary="Crear producto")
 def crear_producto(data: ProductoCreate, _=_ADMIN):
     with UnitOfWork() as uow:
         return service.create(uow, data)
 
 
-@router.put("/{producto_id}", response_model=ProductoResponse, summary="Actualizar producto")
+@router.put("/{producto_id}", response_model=ProductoRead, summary="Actualizar producto")
 def actualizar_producto(
     producto_id: Annotated[int, Path(ge=1)],
     data: ProductoUpdate,
@@ -70,16 +69,15 @@ def actualizar_producto(
 ):
     with UnitOfWork() as uow:
         return service.update(uow, producto_id, data)
-    
-@router.patch("/{producto_id}/reactivar", response_model=ProductoResponse, summary="Reactivar producto inactivo")
-def reactivar_producto(
-    producto_id: Annotated[int, Path(ge=1)],
-    _=_ADMIN,
-):
+
+
+@router.patch("/{producto_id}/reactivar", response_model=ProductoRead, summary="Reactivar producto inactivo")
+def reactivar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
         return service.reactivar(uow, producto_id)
 
-@router.patch("/{producto_id}/disponibilidad", response_model=ProductoResponse, summary="Toggle disponibilidad")
+
+@router.patch("/{producto_id}/disponibilidad", response_model=ProductoRead, summary="Toggle disponibilidad")
 def toggle_disponibilidad(
     producto_id: Annotated[int, Path(ge=1)],
     disponible: bool = Body(..., embed=True),

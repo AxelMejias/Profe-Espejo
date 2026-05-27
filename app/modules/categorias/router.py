@@ -1,16 +1,23 @@
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Query, Path, status
 
-from app.modules.categorias.schemas import CategoriaCreate, CategoriaUpdate, CategoriaRead, PaginatedCategorias
+from app.modules.categorias.schemas import (
+    CategoriaCreate, CategoriaUpdate, CategoriaRead, PaginatedCategorias, CategoriaTree,
+)
 from app.modules.categorias import service
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/categorias", tags=["Categorías"])
 
-# Roles que pueden leer (público funciona también, pero requerimos al menos login)
 _LEER  = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN = Depends(require_role(["ADMIN", "STOCK"]))
+
+
+@router.get("/tree", response_model=list[CategoriaTree], summary="Árbol recursivo de categorías")
+def obtener_arbol(_=_LEER):
+    with UnitOfWork() as uow:
+        return service.get_tree(uow)
 
 
 @router.get("/", response_model=PaginatedCategorias, summary="Listar categorías")
@@ -25,19 +32,13 @@ def listar_categorias(
 
 
 @router.get("/{categoria_id}", response_model=CategoriaRead, summary="Obtener categoría por ID")
-def obtener_categoria(
-    categoria_id: Annotated[int, Path(ge=1)],
-    _=_LEER,
-):
+def obtener_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_LEER):
     with UnitOfWork() as uow:
         return service.get_by_id(uow, categoria_id)
 
 
 @router.get("/{categoria_id}/subcategorias", response_model=list[CategoriaRead])
-def listar_subcategorias(
-    categoria_id: Annotated[int, Path(ge=1)],
-    _=_LEER,
-):
+def listar_subcategorias(categoria_id: Annotated[int, Path(ge=1)], _=_LEER):
     with UnitOfWork() as uow:
         return service.get_subcategorias(uow, categoria_id)
 
@@ -59,9 +60,6 @@ def actualizar_categoria(
 
 
 @router.delete("/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de categoría")
-def eliminar_categoria(
-    categoria_id: Annotated[int, Path(ge=1)],
-    _=_ADMIN,
-):
+def eliminar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
         service.delete(uow, categoria_id)
