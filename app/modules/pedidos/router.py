@@ -115,7 +115,6 @@ def crear_pedido(
 
 @router.post("/{pedido_id}/avanzar", response_model=PedidoResponse,
              summary="Avanzar estado del pedido (ADMIN / COCINERO)")
-             summary="Avanzar estado del pedido (ADMIN / COCINERO)")
 def avanzar_estado(
     pedido_id: Annotated[int, Path(ge=1)],
     data: AvanzarEstadoRequest,
