@@ -32,3 +32,15 @@ class PaginatedCategorias(BaseModel):
     page: int
     size: int
     pages: int
+
+class CategoriaTree(BaseModel):
+    id: int
+    nombre: str
+    descripcion: Optional[str] = None
+    parent_id: Optional[int] = None
+    children: List["CategoriaTree"] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+# Necesario para que Pydantic resuelva la auto-referencia
+CategoriaTree.model_rebuild()

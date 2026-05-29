@@ -4,72 +4,75 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 
-class CategoriaResponse(BaseModel):
-    id: int
-    nombre: str
-    descripcion: Optional[str] = None
-    parent_id: Optional[int] = None
+# ── Sub-schemas para el maestro-detalle ───────────────────────────────────────
 
-    model_config = {"from_attributes": True}
-
-
-class IngredienteInput(BaseModel):
+class InsumoEnProductoCreate(BaseModel):
+    """Un renglón del detalle al crear/actualizar un producto."""
     ingrediente_id: int = Field(gt=0)
-    cantidad: float = Field(gt=0)
+    cantidad: Decimal = Field(gt=0)
 
 
-class IngredienteDeProductoResponse(BaseModel):
-    id: int
+class InsumoEnProductoRead(BaseModel):
+    """Un renglón del detalle al leer un producto."""
+    ingrediente_id: int
     nombre: str
+    cantidad: Decimal
     unidad_medida: str
-    cantidad: float
+    costo_unitario: Decimal
+    subtotal: Decimal          # cantidad * costo_unitario
+    stock_actual: Decimal
+    es_producto_terminado: bool
 
     model_config = {"from_attributes": True}
 
+
+# ── Schemas principales ────────────────────────────────────────────────────────
 
 class ProductoCreate(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
-    precio: Decimal = Field(gt=0, decimal_places=2)
-    stock_cantidad: int = Field(default=0, ge=0)
-    disponible: bool = Field(default=False)
+    margen_ganancia: Decimal = Field(ge=Decimal("0"), le=Decimal("10"))
+    disponible: bool = True
     categoria_ids: List[int] = Field(default_factory=list)
-    ingredientes: List[IngredienteInput] = Field(default_factory=list)
+    insumos: List[InsumoEnProductoCreate] = Field(min_length=1)
 
 
 class ProductoUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
-    precio: Optional[Decimal] = Field(default=None, gt=0, decimal_places=2)
-    stock_cantidad: Optional[int] = Field(default=None, ge=0)
+    margen_ganancia: Optional[Decimal] = Field(default=None, ge=0, le=10)
     disponible: Optional[bool] = None
     categoria_ids: Optional[List[int]] = None
-    ingredientes: Optional[List[IngredienteInput]] = None
+    insumos: Optional[List[InsumoEnProductoCreate]] = None
 
 
-class ProductoListItem(BaseModel):
+class CategoriaSimple(BaseModel):
     id: int
     nombre: str
-    descripcion: Optional[str] = None
-    precio: Decimal
-    stock_cantidad: int
+    parent_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProductoRead(BaseModel):
+    id: int
+    nombre: str
+    descripcion: Optional[str]
+    precio: Decimal                    # calculado: costo_total * (1 + margen)
+    margen_ganancia: Decimal
+    costo_total_insumos: Decimal       # suma de subtotales
     disponible: bool
+    categorias: List[CategoriaSimple]
+    insumos: List[InsumoEnProductoRead]
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
 
-class ProductoResponse(BaseModel):
-    id: int
-    nombre: str
-    descripcion: Optional[str] = None
-    precio: Decimal
-    stock_cantidad: int
-    disponible: bool
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    categorias: List[CategoriaResponse] = []
-    ingredientes: List[IngredienteDeProductoResponse] = []
-
-    model_config = {"from_attributes": True}
+class PaginatedProductos(BaseModel):
+    items: List[ProductoRead]
+    total: int
+    page: int
+    size: int
+    pages: int

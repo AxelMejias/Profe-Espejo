@@ -17,18 +17,21 @@ class Producto(SQLModel, table=True):
     nombre: str = Field(min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
 
-    # DECIMAL(10,2) — nunca float para precios
+    # precio ya NO es ingresado por el usuario — lo calcula el service
     precio: Decimal = Field(
-        sa_column=Column(sa.Numeric(10, 2), nullable=False)
+        default=Decimal("0.00"),
+        sa_column=Column(sa.Numeric(10, 2), nullable=False, server_default="0"),
+    )
+    margen_ganancia: Decimal = Field(
+        default=Decimal("0.30"),
+        sa_column=Column(sa.Numeric(5, 4), nullable=False, server_default="0.3"),
     )
 
-    # Stock y disponibilidad (spec: RN-CA04, RN-CA05)
-    stock_cantidad: int = Field(default=0, ge=0, description="Unidades disponibles en stock")
-    disponible: bool = Field(default=False, description="Toggle manual de disponibilidad")
+    disponible: bool = Field(default=True)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)
-    deleted_at: Optional[datetime] = Field(default=None)   # soft delete (RN-CA09)
+    deleted_at: Optional[datetime] = Field(default=None)
 
     categorias: List["Categoria"] = Relationship(
         back_populates="productos", link_model=ProductoCategoria

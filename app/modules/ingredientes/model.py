@@ -1,6 +1,8 @@
 from typing import Optional, List, TYPE_CHECKING
 from datetime import datetime
-from sqlmodel import SQLModel, Field, Relationship
+from decimal import Decimal
+from sqlmodel import SQLModel, Field, Relationship, Column
+import sqlalchemy as sa
 from app.core.links import ProductoIngrediente
 
 if TYPE_CHECKING:
@@ -15,6 +17,22 @@ class Ingrediente(SQLModel, table=True):
     descripcion: Optional[str] = Field(default=None, max_length=500)
     unidad_medida: str = Field(min_length=1, max_length=50)
     es_alergeno: bool = Field(default=False)
+
+    # ── Campos nuevos Parcial 3 ───────────────────────────────────────────────
+    costo_unitario: Decimal = Field(
+        default=Decimal("0.00"),
+        sa_column=Column(sa.Numeric(10, 2), nullable=False, server_default="0"),
+    )
+    stock_cantidad: Decimal = Field(
+        default=Decimal("0.00"),
+        sa_column=Column(sa.Numeric(10, 3), nullable=False, server_default="0"),
+    )
+    stock_minimo: Decimal = Field(
+        default=Decimal("0.00"),
+        sa_column=Column(sa.Numeric(10, 3), nullable=False, server_default="0"),
+    )
+    # True cuando el insumo ES un producto terminado (ej: una Coca-Cola)
+    es_producto_terminado: bool = Field(default=False)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)
