@@ -28,19 +28,39 @@ from app.modules.pedidos.schemas import (
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FSM — mapa de transiciones válidas (única fuente de verdad)
+# FSM — estructura de transiciones (qué es posible, independiente de roles)
 # ──────────────────────────────────────────────────────────────────────────────
-# Lee así: desde estado X → cualquiera de estos estados Y es válido.
-# Cualquier transición fuera de este mapa lanza 409 INVALID_TRANSITION.
 
 _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
     "PENDIENTE":  {"CONFIRMADO", "CANCELADO"},
     "CONFIRMADO": {"EN_PREP",    "CANCELADO"},
-    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},  # CANCELADO desde aquí: solo ADMIN/COCINERO
+    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},
     "EN_CAMINO":  {"ENTREGADO"},
-    "ENTREGADO":  set(),                         # terminal
-    "CANCELADO":  set(),                         # terminal
+    "ENTREGADO":  set(),   # terminal
+    "CANCELADO":  set(),   # terminal
 }
+
+# RBAC por transición: estado_desde → estado_hacia → roles autorizados
+_PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
+    "PENDIENTE":  {
+        "CONFIRMADO": {"ADMIN", "STOCK"},
+        "CANCELADO":  {"ADMIN", "STOCK"},
+    },
+    "CONFIRMADO": {
+        "EN_PREP":   {"ADMIN", "COCINERO"},
+        "CANCELADO": {"ADMIN"},
+    },
+    "EN_PREP":    {
+        "EN_CAMINO": {"ADMIN", "STOCK"},
+        "CANCELADO": {"ADMIN", "STOCK"},
+    },
+    "EN_CAMINO":  {
+        "ENTREGADO": {"ADMIN", "STOCK"},
+    },
+}
+
+# Roles que ven todos los pedidos (no solo los propios)
+_ROLES_STAFF = {"ADMIN", "COCINERO", "STOCK"}
 
 # Transiciones permitidas al rol CLIENT sobre su propio pedido.
 # El CLIENT solo puede cancelar (y solo desde PENDIENTE o CONFIRMADO).
@@ -113,9 +133,9 @@ def get_all(
 ) -> PaginatedPedidos:
     """
     CLIENT ⇒ solo ve sus pedidos.
-    ADMIN / COCINERO ⇒ ven todos.
+    ADMIN / COCINERO / STOCK ⇒ ven todos.
     """
-    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
+    es_staff = any(r in _ROLES_STAFF for r in requester_roles)
     items, total = uow.pedidos.get_all(
         usuario_id=None if es_staff else requester_user_id,
         estado_codigo=estado_codigo,
@@ -134,7 +154,7 @@ def get_by_id(
     requester_user_id: int,
     requester_roles: list[str],
 ) -> PedidoResponse:
-    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
+    es_staff = any(r in _ROLES_STAFF for r in requester_roles)
     pedido = (
         uow.pedidos.get_by_id(pedido_id)
         if es_staff else
@@ -152,7 +172,7 @@ def get_historial(
     requester_roles: list[str],
 ) -> list[HistorialEstadoResponse]:
     # Reutiliza el check de acceso de get_by_id
-    es_staff = any(r in ("ADMIN", "COCINERO") for r in requester_roles)
+    es_staff = any(r in _ROLES_STAFF for r in requester_roles)
     pedido = (
         uow.pedidos.get_by_id(pedido_id)
         if es_staff else
@@ -333,14 +353,15 @@ def avanzar_estado(
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
 
-    # Permisos: ADMIN puede todo; COCINERO puede avanzar el flujo principal
-    # (CONFIRMADO → EN_PREP → EN_CAMINO → ENTREGADO) y cancelar.
-    es_admin    = "ADMIN" in actor_roles
-    es_cocinero = "COCINERO" in actor_roles
-    if not (es_admin or es_cocinero):
-        _problem("FORBIDDEN",
-                 "Solo ADMIN o COCINERO pueden avanzar el estado de un pedido",
-                 status.HTTP_403_FORBIDDEN)
+    # RBAC por transición específica
+    roles_permitidos = _PERMISOS_TRANSICION.get(pedido.estado_codigo, {}).get(estado_hacia, set())
+    if not any(r in roles_permitidos for r in actor_roles):
+        _problem(
+            "FORBIDDEN",
+            f"Tu rol no tiene permiso para la transición {pedido.estado_codigo} → {estado_hacia}. "
+            f"Roles requeridos: {sorted(roles_permitidos)}",
+            status.HTTP_403_FORBIDDEN,
+        )
 
     # Aplicar transición + audit trail (mismo UoW = misma transacción)
     estado_desde = pedido.estado_codigo

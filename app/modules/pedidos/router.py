@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/pedidos", tags=["Pedidos"])
 
 # Aliases RBAC siguiendo la convención del codebase
 _AUTENTICADO = Depends(require_role(["ADMIN", "COCINERO", "CLIENT", "STOCK"]))
-_STAFF       = Depends(require_role(["ADMIN", "COCINERO"]))
+_STAFF       = Depends(require_role(["ADMIN", "COCINERO", "STOCK"]))
 _CLIENT      = Depends(require_role(["CLIENT"]))
 
 
