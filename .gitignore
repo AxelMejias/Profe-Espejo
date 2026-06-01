@@ -24,3 +24,14 @@ Thumbs.db
 # DB local
 *.db
 *.sqlite3
+
+# Testing
+.pytest_cache/
+pytest-cache-files-*/
+.coverage
+coverage.xml
+.claude/
+htmlcov/
+
+# Type checking
+.mypy_cache/

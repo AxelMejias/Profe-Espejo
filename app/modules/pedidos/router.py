@@ -50,7 +50,6 @@ def listar_pedidos(
     """
     CLIENT ⇒ solo ve sus pedidos.
     ADMIN / COCINERO ⇒ ven todos.
-    ADMIN / COCINERO ⇒ ven todos.
     El filtrado lo hace el service según el payload del JWT.
     """
     with UnitOfWork() as uow:
@@ -108,7 +107,6 @@ def crear_pedido(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FSM — avanzar estado (ADMIN / COCINERO)
 # FSM — avanzar estado (ADMIN / COCINERO)
 # El router solo desempaqueta el body; la validación es 100% del service.
 # ──────────────────────────────────────────────────────────────────────────────
