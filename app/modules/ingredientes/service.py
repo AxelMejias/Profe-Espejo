@@ -25,12 +25,15 @@ def get_all(
     uow,
     nombre: Optional[str] = None,
     es_alergeno: Optional[bool] = None,
+    es_producto_terminado: Optional[bool] = None,
     unidad_medida: Optional[str] = None,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedIngredientes:
     items, total = uow.ingredientes.get_all(
-        nombre=nombre, es_alergeno=es_alergeno, unidad_medida=unidad_medida,
+        nombre=nombre, es_alergeno=es_alergeno,
+        es_producto_terminado=es_producto_terminado,
+        unidad_medida=unidad_medida,
         page=page, size=size,
     )
     return PaginatedIngredientes(

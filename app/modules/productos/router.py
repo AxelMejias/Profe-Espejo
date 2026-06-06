@@ -1,6 +1,10 @@
+from io import BytesIO
 from typing import Annotated, Optional
 import math
-from fastapi import APIRouter, Depends, Query, Path, Body, status
+from decimal import Decimal
+from fastapi import APIRouter, Depends, Query, Path, Body, UploadFile, File, status
+from fastapi.responses import StreamingResponse
+import openpyxl
 
 from app.modules.productos.schemas import (
     ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos,
@@ -13,6 +17,176 @@ router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 
 _PUBLICO = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
 _ADMIN   = Depends(require_role(["ADMIN", "STOCK"]))
+
+_BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
+
+
+@router.get("/exportar", summary="Exportar productos activos a Excel")
+def exportar_productos(_=_ADMIN):
+    rows = []
+    with UnitOfWork() as uow:
+        items, _ = uow.productos.get_all(solo_disponibles=False, page=1, size=10000)
+        for prod in items:
+            cats = ", ".join(c.nombre for c in prod.categorias)
+            links = uow.productos.get_ingrediente_links(prod.id)
+            insumos_parts = []
+            for link in links:
+                ing = uow.ingredientes.get_by_id(link.ingrediente_id)
+                if ing:
+                    insumos_parts.append(f"{ing.nombre}:{link.cantidad}")
+            rows.append([
+                prod.id, prod.nombre, prod.descripcion or "",
+                float(prod.precio), float(prod.margen_ganancia) * 100,
+                "Sí" if prod.disponible else "No",
+                cats, ", ".join(insumos_parts),
+            ])
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Productos"
+    ws.append(["ID", "Nombre", "Descripción", "Precio", "Margen (%)", "Disponible", "Categorías", "Insumos"])
+    for row in rows:
+        ws.append(row)
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=productos.xlsx"},
+    )
+
+
+@router.get("/plantilla", summary="Descargar plantilla Excel para importar productos")
+def descargar_plantilla(_=_ADMIN):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Productos"
+    ws.append([
+        "Nombre", "Descripcion", "Margen Ganancia (ej: 0.30)",
+        "Disponible", "Categorias (nombres separados por coma)",
+        "Insumos (nombre:cantidad separados por coma)",
+    ])
+    ws.append([
+        "Hamburguesa Clásica", "", "0.30", "TRUE",
+        "Comidas rápidas", "Carne:0.2,Pan:1,Lechuga:0.05",
+    ])
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_productos.xlsx"},
+    )
+
+
+@router.post("/importar", summary="Importar productos desde Excel")
+def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
+    from app.modules.productos.model import Producto
+    from app.core.links import ProductoIngrediente
+    from sqlmodel import select
+
+    contents = archivo.file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    ws = wb.active
+
+    creados = 0
+    omitidos = 0
+    errores = []
+
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not row or all(v is None for v in row):
+            continue
+        try:
+            nombre = str(row[0]).strip() if row[0] is not None else ""
+            descripcion = str(row[1]).strip() if len(row) > 1 and row[1] is not None else None
+            margen_raw = row[2] if len(row) > 2 and row[2] is not None else None
+            disponible_raw = str(row[3]).upper().strip() if len(row) > 3 and row[3] is not None else "TRUE"
+            cats_raw = str(row[4]).strip() if len(row) > 4 and row[4] is not None else ""
+            insumos_raw = str(row[5]).strip() if len(row) > 5 and row[5] is not None else ""
+
+            if not nombre:
+                errores.append({"fila": idx, "nombre": "", "motivo": "Nombre requerido"})
+                continue
+            if margen_raw is None:
+                errores.append({"fila": idx, "nombre": nombre, "motivo": "Margen de ganancia requerido"})
+                continue
+            if not insumos_raw:
+                errores.append({"fila": idx, "nombre": nombre, "motivo": "Insumos requeridos"})
+                continue
+
+            margen = Decimal(str(margen_raw))
+            disponible = disponible_raw in _BOOL_MAP
+
+            # Parsear insumos: "nombre:cantidad, nombre:cantidad"
+            insumo_pairs = []
+            for par in insumos_raw.split(","):
+                par = par.strip()
+                if not par:
+                    continue
+                if ":" not in par:
+                    errores.append({"fila": idx, "nombre": nombre, "motivo": f"Formato de insumo inválido: '{par}'"})
+                    break
+                nombre_ing, cantidad_str = par.rsplit(":", 1)
+                insumo_pairs.append((nombre_ing.strip(), Decimal(cantidad_str.strip())))
+            else:
+                if not insumo_pairs:
+                    errores.append({"fila": idx, "nombre": nombre, "motivo": "Debe tener al menos un insumo"})
+                    continue
+
+                with UnitOfWork() as uow:
+                    if uow.productos.get_by_nombre(nombre):
+                        omitidos += 1
+                        continue
+
+                    insumos_orm = []
+                    cantidades = {}
+                    fallo = False
+                    for nombre_ing, cantidad in insumo_pairs:
+                        ing = uow.ingredientes.get_by_nombre(nombre_ing)
+                        if not ing:
+                            errores.append({"fila": idx, "nombre": nombre, "motivo": f"Ingrediente '{nombre_ing}' no encontrado"})
+                            fallo = True
+                            break
+                        cantidades[ing.id] = cantidad
+                        insumos_orm.append(ing)
+
+                    if fallo:
+                        continue
+
+                    costo = sum(ing.costo_unitario * cantidades[ing.id] for ing in insumos_orm)
+                    precio = (costo * (1 + margen)).quantize(Decimal("0.01"))
+
+                    producto = Producto(
+                        nombre=nombre,
+                        descripcion=descripcion or None,
+                        precio=precio,
+                        margen_ganancia=margen,
+                        disponible=disponible,
+                    )
+                    uow.productos.add(producto)
+
+                    for ing in insumos_orm:
+                        uow.productos.add_ingrediente_link(
+                            producto_id=producto.id,
+                            ingrediente_id=ing.id,
+                            cantidad=float(cantidades[ing.id]),
+                        )
+
+                    if cats_raw:
+                        nombres_cats = [c.strip() for c in cats_raw.split(",") if c.strip()]
+                        cats = [c for n in nombres_cats for c in [uow.categorias.get_by_nombre(n)] if c]
+                        if cats:
+                            producto.categorias = cats
+                            uow.productos.add(producto)
+
+                    creados += 1
+        except Exception as e:
+            nombre_str = str(row[0]) if row and row[0] is not None else ""
+            errores.append({"fila": idx, "nombre": nombre_str, "motivo": str(e)})
+
+    return {"creados": creados, "omitidos": omitidos, "errores": errores}
 
 
 @router.get("/", response_model=PaginatedProductos, summary="Listar productos")
