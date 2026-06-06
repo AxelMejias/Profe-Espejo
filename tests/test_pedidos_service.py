@@ -55,7 +55,7 @@ class TestAvanzarEstado:
 
     def test_en_prep_a_en_camino(self):
         uow, pedido = _uow_con_pedido("EN_PREP")
-        service.avanzar_estado(uow, 1, "EN_CAMINO", None, 99, ["COCINERO"])
+        service.avanzar_estado(uow, 1, "EN_CAMINO", None, 99, ["PEDIDOS"])
         assert pedido.estado_codigo == "EN_CAMINO"
 
     def test_en_camino_a_entregado(self):
@@ -192,7 +192,7 @@ class TestAvanzarEstado:
 
     def test_pedidos_puede_avanzar(self):
         uow, pedido = _uow_con_pedido("CONFIRMADO")
-        service.avanzar_estado(uow, 1, "EN_PREP", None, 1, ["COCINERO"])
+        service.avanzar_estado(uow, 1, "EN_PREP", None, 1, ["PEDIDOS"])
         assert pedido.estado_codigo == "EN_PREP"
 
 
@@ -470,7 +470,7 @@ class TestGetAll:
         uow = make_uow()
         uow.pedidos.get_all.return_value = ([], 0)
 
-        service.get_all(uow, requester_user_id=1, requester_roles=["COCINERO"])
+        service.get_all(uow, requester_user_id=1, requester_roles=["PEDIDOS"])
 
         call_kwargs = uow.pedidos.get_all.call_args[1]
         assert call_kwargs.get("usuario_id") is None

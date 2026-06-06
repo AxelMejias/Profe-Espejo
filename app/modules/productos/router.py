@@ -15,8 +15,9 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 
-_PUBLICO = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
-_ADMIN   = Depends(require_role(["ADMIN", "STOCK"]))
+_PUBLICO        = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+_DISPONIBILIDAD = Depends(require_role(["ADMIN", "STOCK"]))   # toggle disponibilidad
+_ADMIN          = Depends(require_role(["ADMIN"]))             # crear, editar, borrar, importar, reactivar
 
 _BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
 
@@ -255,7 +256,7 @@ def reactivar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
 def toggle_disponibilidad(
     producto_id: Annotated[int, Path(ge=1)],
     disponible: bool = Body(..., embed=True),
-    _=_ADMIN,
+    _=_DISPONIBILIDAD,
 ):
     with UnitOfWork() as uow:
         return service.toggle_disponibilidad(uow, producto_id, disponible)

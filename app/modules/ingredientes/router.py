@@ -13,14 +13,15 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/ingredientes", tags=["Ingredientes"])
 
-_LEER  = Depends(require_role(["ADMIN", "STOCK", "COCINERO", "CLIENT"]))
-_ADMIN = Depends(require_role(["ADMIN", "STOCK"]))
+_LEER       = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+_STOCK_EDIT = Depends(require_role(["ADMIN", "STOCK"]))   # leer + actualizar stock vía PUT
+_ADMIN      = Depends(require_role(["ADMIN"]))             # crear, borrar, importar, reactivar
 
 _BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
 
 
 @router.get("/exportar", summary="Exportar ingredientes activos a Excel")
-def exportar_ingredientes(_=_ADMIN):
+def exportar_ingredientes(_=_STOCK_EDIT):
     with UnitOfWork() as uow:
         ingredientes = service.get_all_activos_for_export(uow)
 
@@ -183,7 +184,7 @@ def crear_ingrediente(data: IngredienteCreate, _=_ADMIN):
 def actualizar_ingrediente(
     ingrediente_id: Annotated[int, Path(ge=1)],
     data: IngredienteUpdate,
-    _=_ADMIN,
+    _=_STOCK_EDIT,
 ):
     with UnitOfWork() as uow:
         return service.update(uow, ingrediente_id, data)

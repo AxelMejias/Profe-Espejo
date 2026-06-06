@@ -22,7 +22,7 @@ def _seed_roles(session: Session):
     roles = [
         Rol(codigo="ADMIN",   nombre="Administrador",      descripcion="Acceso total al sistema"),
         Rol(codigo="STOCK",   nombre="Gestor de Stock",    descripcion="Gestión de inventario"),
-        Rol(codigo="COCINERO", nombre="Cocinero",            descripcion="Gestión y avance de pedidos"),
+        Rol(codigo="PEDIDOS",  nombre="Gestor de Pedidos",  descripcion="Ver y avanzar estados de pedidos"),
         Rol(codigo="CLIENT",  nombre="Cliente",            descripcion="Cliente de la tienda"),
     ]
     for rol in roles:
@@ -86,7 +86,7 @@ def _seed_cocina(session: Session):
     )
     session.add(cocina)
     session.flush()
-    session.add(UsuarioRol(usuario_id=cocina.id, rol_codigo="COCINERO"))
+    session.add(UsuarioRol(usuario_id=cocina.id, rol_codigo="PEDIDOS"))
     session.commit()
 
 

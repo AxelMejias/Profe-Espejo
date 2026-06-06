@@ -31,24 +31,24 @@ _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
 # RBAC por transición: estado_desde → estado_hacia → roles autorizados
 _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
     "PENDIENTE":  {
-        "CONFIRMADO": {"ADMIN", "STOCK"},
-        "CANCELADO":  {"ADMIN", "STOCK"},
+        "CONFIRMADO": {"ADMIN", "PEDIDOS"},
+        "CANCELADO":  {"ADMIN", "PEDIDOS"},
     },
     "CONFIRMADO": {
-        "EN_PREP":   {"ADMIN", "COCINERO"},
+        "EN_PREP":   {"ADMIN", "PEDIDOS"},
         "CANCELADO": {"ADMIN"},
     },
     "EN_PREP":    {
-        "EN_CAMINO": {"ADMIN", "STOCK"},
-        "CANCELADO": {"ADMIN", "STOCK"},
+        "EN_CAMINO": {"ADMIN", "PEDIDOS"},
+        "CANCELADO": {"ADMIN", "PEDIDOS"},
     },
     "EN_CAMINO":  {
-        "ENTREGADO": {"ADMIN", "STOCK"},
+        "ENTREGADO": {"ADMIN", "PEDIDOS"},
     },
 }
 
 # Roles que ven todos los pedidos (no solo los propios)
-_ROLES_STAFF = {"ADMIN", "COCINERO", "STOCK"}
+_ROLES_STAFF = {"ADMIN", "PEDIDOS"}
 
 _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
     "PENDIENTE":  {"CANCELADO"},
@@ -116,7 +116,7 @@ def get_all(
 ) -> PaginatedPedidos:
     """
     CLIENT ⇒ solo ve sus pedidos.
-    ADMIN / COCINERO / STOCK ⇒ ven todos.
+    ADMIN / PEDIDOS ⇒ ven todos.
     """
     es_staff = any(r in _ROLES_STAFF for r in requester_roles)
     items, total = uow.pedidos.get_all(
