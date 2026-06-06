@@ -183,7 +183,7 @@ class AuthService:
 
         usuario.password_hash = hash_password(new_password)
         usuario.updated_at = datetime.utcnow()
-        uow.session.add(usuario)
+        uow.usuarios.add(usuario)
         uow.reset_tokens.mark_used(token_obj)
 
     def get_me(self, uow, usuario_id: int) -> UserResponse:

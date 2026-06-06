@@ -180,17 +180,10 @@ def _calcular_requerimientos_insumos(
     y sus cantidades pedidas.
     Retorna: { ingrediente_id: cantidad_total_requerida }
     """
-    from sqlmodel import select
-    from app.core.links import ProductoIngrediente
-
     requerido: dict[int, Decimal] = {}
 
     for item in items:
-        links = list(uow.session.exec(
-            select(ProductoIngrediente).where(
-                ProductoIngrediente.producto_id == item.producto_id
-            )
-        ).all())
+        links = uow.productos.get_ingrediente_links(item.producto_id)
         for link in links:
             clave = link.ingrediente_id
             cantidad = Decimal(str(link.cantidad)) * item.cantidad
@@ -209,8 +202,6 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     5. Decrementar stock de los insumos involucrados.
     6. Persistir Pedido + DetallePedido + HistorialEstadoPedido.
     """
-    from app.modules.ingredientes.model import Ingrediente
-
     # 1. Forma de pago
     forma_pago = uow.formas_pago.get_by_codigo(data.forma_pago_codigo)
     if not forma_pago:
@@ -265,7 +256,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     # 4. Validar stock de insumos
     requerido = _calcular_requerimientos_insumos(uow, data.items)
     for ing_id, cantidad_req in requerido.items():
-        ing = uow.session.get(Ingrediente, ing_id)
+        ing = uow.ingredientes.get_by_id(ing_id)
         if not ing:
             _problem("INSUMO_NOT_FOUND", f"Insumo {ing_id} no encontrado", status.HTTP_404_NOT_FOUND)
         if ing.stock_cantidad < cantidad_req:
@@ -278,10 +269,10 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 
     # 5. Decrementar stock de insumos
     for ing_id, cantidad_req in requerido.items():
-        ing = uow.session.get(Ingrediente, ing_id)
+        ing = uow.ingredientes.get_by_id(ing_id)
         ing.stock_cantidad -= cantidad_req
         ing.updated_at = datetime.utcnow()
-        uow.session.add(ing)
+        uow.ingredientes.add(ing)
 
     # 6. Calcular totales y persistir Pedido
     descuento = Decimal("0.00")

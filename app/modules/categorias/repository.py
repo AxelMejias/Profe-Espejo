@@ -51,6 +51,18 @@ class CategoriaRepository(BaseRepository[Categoria]):
             ).all()
         )
 
+    def get_by_ids(self, ids: list[int]) -> List[Categoria]:
+        if not ids:
+            return []
+        return list(
+            self.session.exec(
+                select(Categoria).where(
+                    Categoria.id.in_(ids),
+                    Categoria.deleted_at == None,
+                )
+            ).all()
+        )
+
     def soft_delete(self, categoria: Categoria) -> None:
         from datetime import datetime
         categoria.deleted_at = datetime.utcnow()

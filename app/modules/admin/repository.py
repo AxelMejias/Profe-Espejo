@@ -74,6 +74,15 @@ class UsuarioAdminRepository:
         self.session.flush()
         return True
 
+    def add(self, entity) -> None:
+        self.session.add(entity)
+        self.session.flush()
+
+    def get_rol(self, rol_codigo: str) -> Optional[Rol]:
+        return self.session.exec(
+            select(Rol).where(Rol.codigo == rol_codigo)
+        ).first()
+
     def soft_delete(self, usuario: Usuario) -> None:
         usuario.deleted_at = datetime.utcnow()
         self.session.add(usuario)

@@ -9,8 +9,6 @@ from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException, status
 
-from app.core.links import ProductoIngrediente
-from app.modules.categorias.model import Categoria
 from app.modules.ingredientes.model import Ingrediente
 from app.modules.productos.model import Producto
 from app.modules.productos.schemas import (
@@ -26,21 +24,14 @@ def _problem(code: str, detail: str, http_status: int):
     )
 
 
-
 def _build_response(uow, producto: Producto) -> ProductoRead:
-    from sqlmodel import select
-
-    links = list(uow.session.exec(
-        select(ProductoIngrediente).where(
-            ProductoIngrediente.producto_id == producto.id
-        )
-    ).all())
+    links = uow.productos.get_ingrediente_links(producto.id)
 
     insumos_read = []
     costo_total = Decimal("0.00")
 
     for link in links:
-        ing: Optional[Ingrediente] = uow.session.get(Ingrediente, link.ingrediente_id)
+        ing: Optional[Ingrediente] = uow.ingredientes.get_by_id(link.ingrediente_id)
         if not ing:
             continue
         subtotal = Decimal(str(link.cantidad)) * ing.costo_unitario
@@ -118,8 +109,6 @@ def get_by_id(uow, producto_id: int) -> ProductoRead:
 
 
 def create(uow, data: ProductoCreate) -> ProductoRead:
-    from sqlmodel import select
-
     if uow.productos.get_by_nombre(data.nombre):
         _problem("NOMBRE_CONFLICT", f"Ya existe un producto '{data.nombre}'", status.HTTP_409_CONFLICT)
 
@@ -140,7 +129,6 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
 
     precio = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
 
-
     producto = Producto(
         nombre=data.nombre,
         descripcion=data.descripcion,
@@ -148,31 +136,24 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
         margen_ganancia=data.margen_ganancia,
         disponible=data.disponible,
     )
-    uow.productos.add(producto)   # flush interno → genera el ID
+    uow.productos.add(producto)
 
     for ing in insumos_orm:
-        link = ProductoIngrediente(
+        uow.productos.add_ingrediente_link(
             producto_id=producto.id,
             ingrediente_id=ing.id,
             cantidad=float(cantidades[ing.id]),
         )
-        uow.session.add(link)
-    uow.session.flush()
 
     if data.categoria_ids:
-        cats = list(uow.session.exec(
-            select(Categoria).where(Categoria.id.in_(data.categoria_ids))
-        ).all())
+        cats = uow.categorias.get_by_ids(data.categoria_ids)
         producto.categorias = cats
-        uow.session.add(producto)
-        uow.session.flush()
+        uow.productos.add(producto)
 
     return _build_response(uow, producto)
 
 
 def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
-    from sqlmodel import select, delete as sql_delete
-
     producto = uow.productos.get_by_id(producto_id)
     if not producto:
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
@@ -183,12 +164,7 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
             setattr(producto, field, val)
 
     if data.insumos is not None:
-        uow.session.exec(
-            sql_delete(ProductoIngrediente).where(
-                ProductoIngrediente.producto_id == producto_id
-            )
-        )
-        uow.session.flush()
+        uow.productos.delete_ingrediente_links(producto_id)
 
         margen = data.margen_ganancia if data.margen_ganancia is not None else producto.margen_ganancia
         cantidades: dict[int, Decimal] = {}
@@ -199,33 +175,27 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
                 _problem("INSUMO_NOT_FOUND", f"Insumo {item.ingrediente_id} no encontrado", status.HTTP_404_NOT_FOUND)
             cantidades[ing.id] = item.cantidad
             insumos_orm.append(ing)
-            uow.session.add(ProductoIngrediente(
+            uow.productos.add_ingrediente_link(
                 producto_id=producto_id,
                 ingrediente_id=ing.id,
                 cantidad=float(item.cantidad),
-            ))
+            )
         producto.margen_ganancia = margen
         producto.precio = _calcular_precio(insumos_orm, cantidades, margen)
-        uow.session.flush()
 
     elif data.margen_ganancia is not None:
-        links = list(uow.session.exec(
-            select(ProductoIngrediente).where(ProductoIngrediente.producto_id == producto_id)
-        ).all())
+        links = uow.productos.get_ingrediente_links(producto_id)
         cantidades = {l.ingrediente_id: Decimal(str(l.cantidad)) for l in links}
-        insumos_orm = [uow.session.get(Ingrediente, iid) for iid in cantidades]
+        insumos_orm = [uow.ingredientes.get_by_id(iid) for iid in cantidades]
         producto.margen_ganancia = data.margen_ganancia
         producto.precio = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
 
     if data.categoria_ids is not None:
-        cats = list(uow.session.exec(
-            select(Categoria).where(Categoria.id.in_(data.categoria_ids))
-        ).all())
+        cats = uow.categorias.get_by_ids(data.categoria_ids)
         producto.categorias = cats
 
     producto.updated_at = datetime.utcnow()
-    uow.session.add(producto)
-    uow.session.flush()
+    uow.productos.add(producto)
     return _build_response(uow, producto)
 
 
@@ -235,7 +205,7 @@ def toggle_disponibilidad(uow, producto_id: int, disponible: bool) -> ProductoRe
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
     producto.disponible = disponible
     producto.updated_at = datetime.utcnow()
-    uow.session.add(producto)
+    uow.productos.add(producto)
     return _build_response(uow, producto)
 
 
@@ -253,5 +223,5 @@ def reactivar(uow, producto_id: int) -> ProductoRead:
     producto.deleted_at = None
     producto.disponible = True
     producto.updated_at = datetime.utcnow()
-    uow.session.add(producto)
+    uow.productos.add(producto)
     return _build_response(uow, producto)

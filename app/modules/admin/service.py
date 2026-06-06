@@ -63,7 +63,7 @@ def update(uow, usuario_id: int, data: UsuarioAdminUpdate) -> UsuarioAdminRespon
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(usuario, key, value)
     usuario.updated_at = datetime.utcnow()
-    uow.session.add(usuario)
+    uow.usuarios_admin.add(usuario)
     return _build_response(uow, usuario)
 
 
@@ -80,9 +80,7 @@ def asignar_rol(uow, usuario_id: int, rol_codigo: str, actor_id: int) -> Usuario
         _problem("USER_NOT_FOUND", f"Usuario {usuario_id} no encontrado", status.HTTP_404_NOT_FOUND)
 
     # Verificar que el rol existe
-    from app.modules.auth.model import Rol
-    from sqlmodel import select
-    rol = uow.session.exec(select(Rol).where(Rol.codigo == rol_codigo)).first()
+    rol = uow.usuarios_admin.get_rol(rol_codigo)
     if not rol:
         _problem("ROL_NOT_FOUND", f"Rol '{rol_codigo}' no existe", status.HTTP_404_NOT_FOUND)
 
