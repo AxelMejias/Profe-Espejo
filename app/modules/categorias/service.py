@@ -70,6 +70,17 @@ def delete(uow, categoria_id: int) -> None:
     categoria = uow.categorias.get_by_id(categoria_id)
     if not categoria:
         _problem("CATEGORIA_NOT_FOUND", f"Categoría {categoria_id} no encontrada", status.HTTP_404_NOT_FOUND)
+
+    # Bloquear si la categoría o alguna descendiente tiene productos activos
+    all_ids = uow.categorias.get_descendant_ids(categoria_id)
+    count = uow.categorias.count_active_products(all_ids)
+    if count:
+        _problem(
+            "CATEGORIA_CON_PRODUCTOS",
+            f"No se puede eliminar '{categoria.nombre}': tiene {count} producto{'s' if count != 1 else ''} activo{'s' if count != 1 else ''} asignado{'s' if count != 1 else ''}.",
+            status.HTTP_409_CONFLICT,
+        )
+
     uow.categorias.soft_delete(categoria)
 
 def _build_tree(categoria: Categoria, todas: list[Categoria]) -> CategoriaTree:

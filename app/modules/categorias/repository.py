@@ -1,6 +1,7 @@
 import math
 from typing import List, Optional, Tuple
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from app.core.base_repository import BaseRepository
 from app.modules.categorias.model import Categoria
@@ -62,6 +63,22 @@ class CategoriaRepository(BaseRepository[Categoria]):
                 )
             ).all()
         )
+
+    def count_active_products(self, categoria_ids: List[int]) -> int:
+        """Cuántos productos activos tienen al menos una de estas categorías asignada."""
+        if not categoria_ids:
+            return 0
+        from app.modules.productos.model import Producto
+        from app.core.links import ProductoCategoria
+        count = self.session.exec(
+            select(func.count(Producto.id.distinct()))
+            .join(ProductoCategoria, ProductoCategoria.producto_id == Producto.id)
+            .where(
+                ProductoCategoria.categoria_id.in_(categoria_ids),
+                Producto.deleted_at == None,
+            )
+        ).one()
+        return count or 0
 
     def get_descendant_ids(self, categoria_id: int) -> List[int]:
         """Retorna el ID dado más todos los IDs de sus subcategorías (recursivo)."""
