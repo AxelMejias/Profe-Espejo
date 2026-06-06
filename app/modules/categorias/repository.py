@@ -63,6 +63,18 @@ class CategoriaRepository(BaseRepository[Categoria]):
             ).all()
         )
 
+    def get_descendant_ids(self, categoria_id: int) -> List[int]:
+        """Retorna el ID dado más todos los IDs de sus subcategorías (recursivo)."""
+        result = [categoria_id]
+        queue = [categoria_id]
+        while queue:
+            parent_id = queue.pop()
+            children = self.get_subcategorias(parent_id)
+            for child in children:
+                result.append(child.id)
+                queue.append(child.id)
+        return result
+
     def soft_delete(self, categoria: Categoria) -> None:
         from datetime import datetime
         categoria.deleted_at = datetime.utcnow()

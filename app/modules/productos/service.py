@@ -85,11 +85,13 @@ def get_all(
     page: int = 1,
     size: int = 20,
 ) -> PaginatedProductos:
+    # Expand categoria_id to include all descendant category IDs
+    categoria_ids = uow.categorias.get_descendant_ids(categoria_id) if categoria_id else None
     items, total = uow.productos.get_all(
         nombre=nombre,
         precio_min=precio_min,
         precio_max=precio_max,
-        categoria_id=categoria_id,
+        categoria_ids=categoria_ids,
         solo_disponibles=solo_disponibles,
         page=page,
         size=size,

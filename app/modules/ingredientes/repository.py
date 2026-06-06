@@ -48,8 +48,13 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
             query = query.where(Ingrediente.unidad_medida.icontains(unidad_medida))
         if es_alergeno is not None:
             query = query.where(Ingrediente.es_alergeno == es_alergeno)
-        if es_producto_terminado is not None:
-            query = query.where(Ingrediente.es_producto_terminado == es_producto_terminado)
+        if es_producto_terminado is True:
+            query = query.where(Ingrediente.es_producto_terminado == True)
+        elif es_producto_terminado is False:
+            # NULL se trata como False (registros sin valor explícito = materia prima)
+            query = query.where(
+                (Ingrediente.es_producto_terminado == False) | (Ingrediente.es_producto_terminado == None)
+            )
         total = len(self.session.exec(query).all())
         offset = (page - 1) * size
         items = list(self.session.exec(query.offset(offset).limit(size)).all())

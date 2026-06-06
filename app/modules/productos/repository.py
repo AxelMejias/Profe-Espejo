@@ -35,7 +35,7 @@ class ProductoRepository(BaseRepository[Producto]):
         nombre: Optional[str] = None,
         precio_min: Optional[float] = None,
         precio_max: Optional[float] = None,
-        categoria_id: Optional[int] = None,
+        categoria_ids: Optional[List[int]] = None,
         solo_disponibles: bool = True,
         page: int = 1,
         size: int = 20,
@@ -49,10 +49,10 @@ class ProductoRepository(BaseRepository[Producto]):
             query = query.where(Producto.precio >= precio_min)
         if precio_max is not None:
             query = query.where(Producto.precio <= precio_max)
-        if categoria_id is not None:
+        if categoria_ids:
             query = query.join(ProductoCategoria).where(
-                ProductoCategoria.categoria_id == categoria_id
-            )
+                ProductoCategoria.categoria_id.in_(categoria_ids)
+            ).distinct()
         total = len(self.session.exec(query).all())
         offset = (page - 1) * size
         items = list(self.session.exec(query.offset(offset).limit(size)).all())
