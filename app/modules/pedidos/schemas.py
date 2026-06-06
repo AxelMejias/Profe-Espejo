@@ -30,11 +30,19 @@ class AvanzarEstadoRequest(BaseModel):
     """
     estado_hacia: str = Field(min_length=1, max_length=20)
     motivo: Optional[str] = Field(default=None, max_length=500)
+    restaurar_stock: bool = Field(
+        default=True,
+        description="Si True, devuelve el stock de los insumos al cancelar.",
+    )
 
 
 class CancelarPedidoRequest(BaseModel):
     """Body para que el CLIENT cancele su propio pedido (PENDIENTE/CONFIRMADO)."""
     motivo: str = Field(min_length=1, max_length=500)
+    restaurar_stock: bool = Field(
+        default=True,
+        description="Si True, devuelve el stock de los insumos al cancelar.",
+    )
 
 
 # ── Response schemas ─────────────────────────────────────────────────────────

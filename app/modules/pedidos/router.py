@@ -127,6 +127,7 @@ def avanzar_estado(
             motivo=data.motivo,
             actor_user_id=int(payload["sub"]),
             actor_roles=payload.get("roles", []),
+            restaurar_stock=data.restaurar_stock,
         )
 
 
@@ -144,5 +145,7 @@ def cancelar_pedido(
 ):
     with UnitOfWork() as uow:
         return service.cancelar_pedido_cliente(
-            uow, pedido_id, data.motivo, cliente_user_id=usuario_id,
+            uow, pedido_id, data.motivo,
+            cliente_user_id=usuario_id,
+            restaurar_stock=data.restaurar_stock,
         )

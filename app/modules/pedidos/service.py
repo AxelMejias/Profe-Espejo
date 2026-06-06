@@ -308,6 +308,35 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Restaurar stock al cancelar
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _restaurar_stock_pedido(uow, pedido: Pedido) -> None:
+    """
+    Incrementa el stock de cada insumo según lo consumido al crear el pedido.
+    Usa los ingrediente_links actuales del producto × la cantidad del detalle.
+    """
+    detalles = uow.pedidos.get_detalles(pedido.id)
+    acumulado: dict[int, Decimal] = {}
+
+    for detalle in detalles:
+        links = uow.productos.get_ingrediente_links(detalle.producto_id)
+        for link in links:
+            cantidad = Decimal(str(link.cantidad)) * detalle.cantidad
+            acumulado[link.ingrediente_id] = (
+                acumulado.get(link.ingrediente_id, Decimal("0")) + cantidad
+            )
+
+    for ing_id, cantidad in acumulado.items():
+        ing = uow.ingredientes.get_by_id(ing_id)
+        if not ing:
+            continue
+        ing.stock_cantidad += cantidad
+        ing.updated_at = datetime.utcnow()
+        uow.ingredientes.add(ing)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Avanzar estado (ADMIN / PEDIDOS) — núcleo de la máquina de estados
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -318,6 +347,7 @@ def avanzar_estado(
     motivo: Optional[str],
     actor_user_id: int,
     actor_roles: list[str],
+    restaurar_stock: bool = True,
 ) -> PedidoResponse:
     pedido = uow.pedidos.get_by_id(pedido_id)
     if not pedido:
@@ -350,6 +380,9 @@ def avanzar_estado(
             status.HTTP_403_FORBIDDEN,
         )
 
+    if estado_hacia == _ESTADO_CANCELADO and restaurar_stock:
+        _restaurar_stock_pedido(uow, pedido)
+
     estado_desde          = pedido.estado_codigo
     pedido.estado_codigo  = estado_hacia
     pedido.updated_at     = datetime.utcnow()
@@ -375,6 +408,7 @@ def cancelar_pedido_cliente(
     pedido_id: int,
     motivo: str,
     cliente_user_id: int,
+    restaurar_stock: bool = True,
 ) -> PedidoResponse:
     pedido = uow.pedidos.get_by_id_for_user(pedido_id, cliente_user_id)
     if not pedido:
@@ -393,6 +427,9 @@ def cancelar_pedido_cliente(
         _problem("MOTIVO_REQUIRED",
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
+
+    if restaurar_stock:
+        _restaurar_stock_pedido(uow, pedido)
 
     estado_desde         = pedido.estado_codigo
     pedido.estado_codigo = _ESTADO_CANCELADO
