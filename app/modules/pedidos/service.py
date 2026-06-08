@@ -5,7 +5,7 @@ Regla: NO crea su propio UoW. Recibe `uow` del router.
 import math
 import urllib.request
 import json as _json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Set
 from fastapi import HTTPException, status
@@ -624,6 +624,32 @@ def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
         motivo="Pago confirmado por MercadoPago",
     ))
     return _build_response(uow, pedido)
+
+
+def cancelar_pedidos_expirados(uow, minutos: int = 30) -> int:
+    """
+    Cancela todos los pedidos ESPERANDO_PAGO con más de `minutos` minutos sin pago.
+    Restaura stock y registra historial con usuario_id=None (acción del sistema).
+    Retorna la cantidad de pedidos cancelados.
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=minutos)
+    pedidos = uow.pedidos.get_esperando_pago_expirados(cutoff)
+    cancelados = 0
+    for pedido in pedidos:
+        _restaurar_stock_pedido(uow, pedido)
+        estado_desde         = pedido.estado_codigo
+        pedido.estado_codigo = _ESTADO_CANCELADO
+        pedido.updated_at    = datetime.utcnow()
+        uow.pedidos.add(pedido)
+        uow.pedidos.add_historial(HistorialEstadoPedido(
+            pedido_id=pedido.id,
+            estado_desde=estado_desde,
+            estado_hacia=_ESTADO_CANCELADO,
+            usuario_id=None,
+            motivo=f"Cancelado automáticamente: sin pago confirmado en {minutos} minutos",
+        ))
+        cancelados += 1
+    return cancelados
 
 
 def cancelar_pago_mp(uow, pedido_id: int) -> None:

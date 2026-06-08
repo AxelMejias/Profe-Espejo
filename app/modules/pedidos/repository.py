@@ -147,3 +147,13 @@ class PedidoRepository(BaseRepository[Pedido]):
         self.session.add(entry)
         self.session.flush()
         return entry
+
+    def get_esperando_pago_expirados(self, cutoff: datetime) -> List[Pedido]:
+        """Pedidos ESPERANDO_PAGO creados antes de `cutoff` (sin soft-delete)."""
+        return list(self.session.exec(
+            select(Pedido).where(
+                Pedido.estado_codigo == "ESPERANDO_PAGO",
+                Pedido.deleted_at == None,
+                Pedido.created_at <= cutoff,
+            )
+        ).all())
