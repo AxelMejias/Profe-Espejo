@@ -506,6 +506,49 @@ def cancelar_pedido_cliente(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# WebSocket — emisión de eventos en tiempo real
+# ──────────────────────────────────────────────────────────────────────────────
+
+_EVENTOS_WS: dict[str, str] = {
+    "PENDIENTE":  "NUEVO_PEDIDO",
+    "CONFIRMADO": "PEDIDO_CONFIRMADO",
+    "EN_PREP":    "PEDIDO_EN_PREPARACION",
+    "EN_CAMINO":  "PEDIDO_EN_CAMINO",
+    "ENTREGADO":  "PEDIDO_ENTREGADO",
+    "CANCELADO":  "PEDIDO_CANCELADO",
+}
+
+# Roles de staff notificados en cada transición
+_ROLES_POR_ESTADO: dict[str, list[str]] = {
+    "PENDIENTE":  ["pedidos", "admin"],
+    "CONFIRMADO": ["pedidos", "admin"],
+    "EN_PREP":    ["pedidos", "admin"],
+    "EN_CAMINO":  ["pedidos", "admin"],
+    "ENTREGADO":  ["pedidos", "admin"],
+    "CANCELADO":  ["pedidos", "admin"],
+}
+
+
+async def emit_ws_evento(pedido_id: int, estado: str, data: dict) -> None:
+    """
+    Emite un evento WS a la room del pedido y a las rooms de rol del staff.
+    Se llama desde el router DESPUÉS de que el UoW commitea el cambio.
+    No lanza excepciones — si no hay conexiones activas, es silencioso.
+    """
+    from app.core.websocket import manager
+
+    event_type = _EVENTOS_WS.get(estado)
+    if not event_type:
+        return
+
+    await manager.broadcast_to_order(pedido_id, event_type, data)
+
+    roles = _ROLES_POR_ESTADO.get(estado, [])
+    if roles:
+        await manager.broadcast_to_roles(roles, event_type, data)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Verificar pago en MP (polling desde el frontend al cerrar el popup)
 # ──────────────────────────────────────────────────────────────────────────────
 

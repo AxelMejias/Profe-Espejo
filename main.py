@@ -83,3 +83,13 @@ app.include_router(admin_router)
 @app.get("/", tags=["Root"])
 def root():
     return {"mensaje": "Food Store API v3 — feature-first"}
+
+
+@app.get("/debug/ws-rooms", tags=["debug"])
+def ws_rooms():
+    """Rooms WebSocket activas y cantidad de sockets por room."""
+    from app.core.websocket import manager
+    return {
+        "total_connections": manager.get_active_connections_count(),
+        "rooms": manager.get_rooms_info(),
+    }
