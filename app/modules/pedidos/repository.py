@@ -86,6 +86,7 @@ class PedidoRepository(BaseRepository[Pedido]):
         self,
         usuario_id: Optional[int] = None,
         estado_codigo: Optional[str] = None,
+        excluir_estados: Optional[List[str]] = None,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Pedido], int]:
@@ -98,6 +99,8 @@ class PedidoRepository(BaseRepository[Pedido]):
             query = query.where(Pedido.usuario_id == usuario_id)
         if estado_codigo:
             query = query.where(Pedido.estado_codigo == estado_codigo)
+        if excluir_estados:
+            query = query.where(Pedido.estado_codigo.not_in(excluir_estados))
         query = query.order_by(Pedido.created_at.desc())
 
         total = len(self.session.exec(query).all())

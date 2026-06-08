@@ -84,6 +84,10 @@ def _problem(code: str, detail: str, http_status: int):
 
 def _build_response(uow, pedido: Pedido, init_point: Optional[str] = None) -> PedidoResponse:
     detalles = uow.pedidos.get_detalles(pedido.id)
+    # Exponer init_point cuando el pedido todavía espera pago (para reintentar)
+    resolved_init_point = init_point or (
+        pedido.mp_init_point if pedido.estado_codigo == _ESTADO_ESPERANDO_PAGO else None
+    )
     return PedidoResponse(
         id=pedido.id,
         usuario_id=pedido.usuario_id,
@@ -98,7 +102,7 @@ def _build_response(uow, pedido: Pedido, init_point: Optional[str] = None) -> Pe
         created_at=pedido.created_at,
         updated_at=pedido.updated_at,
         detalles=[DetallePedidoResponse.model_validate(d) for d in detalles],
-        init_point=init_point,
+        init_point=resolved_init_point,
     )
 
 
@@ -198,9 +202,12 @@ def get_all(
     ADMIN / PEDIDOS ⇒ ven todos.
     """
     es_staff = any(r in _ROLES_STAFF for r in requester_roles)
+    # Staff no ve pedidos ESPERANDO_PAGO (pago no confirmado = no formalizado)
+    excluir_estados = [_ESTADO_ESPERANDO_PAGO] if es_staff else []
     items, total = uow.pedidos.get_all(
         usuario_id=None if es_staff else requester_user_id,
         estado_codigo=estado_codigo,
+        excluir_estados=excluir_estados,
         page=page, size=size,
     )
     return PaginatedPedidos(
@@ -402,6 +409,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     if data.forma_pago_codigo == _FORMA_PAGO_MP:
         preference_id, init_point = _crear_preferencia_mp(pedido, detalles_a_insertar)
         pedido.mp_preference_id = preference_id
+        pedido.mp_init_point = init_point
         uow.pedidos.add(pedido)
 
     return _build_response(uow, pedido, init_point=init_point)
