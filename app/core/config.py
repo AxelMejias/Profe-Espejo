@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     N8N_WEBHOOK_URL: str = "https://akcel11.app.n8n.cloud/webhook/food-store-reset"
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # MercadoPago
+    MP_ACCESS_TOKEN: str = ""
+    MP_PUBLIC_KEY: str = ""
+    MP_SANDBOX: bool = True
+
+    # Cloudinary
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
+
     # Cookie config
     # En producción: True (requiere HTTPS). En desarrollo: False.
     COOKIE_SECURE: bool = False

@@ -13,6 +13,9 @@ openpyxl
 google-auth
 httpx
 requests
+cloudinary
+python-multipart
+mercadopago
 
 # Testing
 pytest

@@ -56,6 +56,7 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
         id=producto.id,
         nombre=producto.nombre,
         descripcion=producto.descripcion,
+        image_url=producto.image_url,
         precio=producto.precio,
         margen_ganancia=producto.margen_ganancia,
         costo_total_insumos=costo_total,
@@ -134,6 +135,7 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
     producto = Producto(
         nombre=data.nombre,
         descripcion=data.descripcion,
+        image_url=data.image_url,
         precio=precio,
         margen_ganancia=data.margen_ganancia,
         disponible=data.disponible,
@@ -160,7 +162,7 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
     if not producto:
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
 
-    for field in ("nombre", "descripcion", "disponible"):
+    for field in ("nombre", "descripcion", "image_url", "disponible"):
         val = getattr(data, field)
         if val is not None:
             setattr(producto, field, val)

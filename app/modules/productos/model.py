@@ -27,6 +27,7 @@ class Producto(SQLModel, table=True):
         sa_column=Column(sa.Numeric(5, 4), nullable=False, server_default="0.3"),
     )
 
+    image_url: Optional[str] = Field(default=None, max_length=500)
     disponible: bool = Field(default=True)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
