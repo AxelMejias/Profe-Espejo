@@ -1,6 +1,7 @@
 import json
 from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Query, Path, status, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from jose import JWTError
 
 from app.modules.pedidos.schemas import (
@@ -9,6 +10,7 @@ from app.modules.pedidos.schemas import (
     HistorialEstadoResponse, EstadoPedidoResponse, FormaPagoResponse,
 )
 from app.modules.pedidos import service
+from app.core.config import settings
 from app.core.dependencies import (
     get_current_user_id, get_current_user_payload, require_role,
 )
@@ -63,6 +65,38 @@ def listar_pedidos(
             estado_codigo=estado_codigo,
             page=page, size=size,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MercadoPago back_url callbacks (sin auth — redireccionados por el browser)
+# MP llama: GET /mp-callback/{success|failure|pending}?pedido_id=X&payment_id=Y&...
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/mp-callback/{result_status}", summary="Redirect de MercadoPago tras el pago")
+async def mp_callback(
+    result_status: str,
+    pedido_id: int,
+    payment_id: Optional[int] = None,
+    collection_id: Optional[int] = None,
+):
+    pid = payment_id or collection_id
+    frontend = settings.FRONTEND_URL
+
+    if result_status == "success":
+        with UnitOfWork() as uow:
+            result = service.confirmar_pago_mp(uow, pedido_id)
+        await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+        url = f"{frontend}/pedido-exitoso?collection_status=approved&external_reference={pedido_id}&payment_id={pid or ''}"
+
+    elif result_status == "failure":
+        with UnitOfWork() as uow:
+            service.cancelar_pago_mp(uow, pedido_id)
+        url = f"{frontend}/pedido-exitoso?collection_status=failure&external_reference={pedido_id}"
+
+    else:  # pending
+        url = f"{frontend}/pedido-exitoso?collection_status=pending&external_reference={pedido_id}"
+
+    return RedirectResponse(url=url, status_code=302)
 
 
 @router.get("/{pedido_id}", response_model=PedidoResponse, summary="Obtener pedido por ID")

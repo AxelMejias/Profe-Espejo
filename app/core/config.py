@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = "294873652507-1bcbqukkqdokhsdv0u76i2pdhhnb19vm.apps.googleusercontent.com"
     N8N_WEBHOOK_URL: str = "https://akcel11.app.n8n.cloud/webhook/food-store-reset"
     FRONTEND_URL: str = "http://localhost:5173"
+    BACKEND_URL: str = "http://localhost:8000"
 
     # MercadoPago
     MP_ACCESS_TOKEN: str = ""

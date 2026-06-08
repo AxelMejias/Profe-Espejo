@@ -21,6 +21,7 @@ from app.modules.pedidos.schemas import (
 # ──────────────────────────────────────────────────────────────────────────────
 
 _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
+    "ESPERANDO_PAGO": {"PENDIENTE", "CANCELADO"},
     "PENDIENTE":  {"CONFIRMADO", "CANCELADO"},
     "CONFIRMADO": {"EN_PREP",    "CANCELADO"},
     "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},
@@ -31,6 +32,10 @@ _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
 
 # RBAC por transición: estado_desde → estado_hacia → roles autorizados
 _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
+    "ESPERANDO_PAGO": {
+        "PENDIENTE":  {"ADMIN", "PEDIDOS"},
+        "CANCELADO":  {"ADMIN", "PEDIDOS"},
+    },
     "PENDIENTE":  {
         "CONFIRMADO": {"ADMIN", "PEDIDOS"},
         "CANCELADO":  {"ADMIN", "PEDIDOS"},
@@ -52,14 +57,16 @@ _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
 _ROLES_STAFF = {"ADMIN", "PEDIDOS"}
 
 _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
+    "ESPERANDO_PAGO": {"CANCELADO"},
     "PENDIENTE":  {"CANCELADO"},
     "CONFIRMADO": {"CANCELADO"},
 }
 
-_COSTO_ENVIO_DEFAULT = Decimal("50.00")
-_ESTADO_PENDIENTE    = "PENDIENTE"
-_ESTADO_CANCELADO    = "CANCELADO"
-_FORMA_PAGO_MP       = "MERCADOPAGO"
+_COSTO_ENVIO_DEFAULT    = Decimal("50.00")
+_ESTADO_ESPERANDO_PAGO  = "ESPERANDO_PAGO"
+_ESTADO_PENDIENTE       = "PENDIENTE"
+_ESTADO_CANCELADO       = "CANCELADO"
+_FORMA_PAGO_MP          = "MERCADOPAGO"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -110,9 +117,9 @@ def _crear_preferencia_mp(pedido: Pedido, detalles: list) -> tuple[str, str]:
             for d in detalles
         ],
         "back_urls": {
-            "success": f"{settings.FRONTEND_URL}/pedido-exitoso",
-            "failure": f"{settings.FRONTEND_URL}/pedido-exitoso",
-            "pending": f"{settings.FRONTEND_URL}/pedido-exitoso",
+            "success": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/success?pedido_id={pedido.id}",
+            "failure": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/failure?pedido_id={pedido.id}",
+            "pending": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/pending?pedido_id={pedido.id}",
         },
         "external_reference": str(pedido.id),
         "statement_descriptor": "Food Store",
@@ -330,10 +337,17 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     costo_envio = _COSTO_ENVIO_DEFAULT if data.direccion_id is not None else Decimal("0.00")
     total = subtotal - descuento + costo_envio
 
+    # MP empieza en ESPERANDO_PAGO hasta que el back_url confirme el pago
+    estado_inicial = (
+        _ESTADO_ESPERANDO_PAGO
+        if data.forma_pago_codigo == _FORMA_PAGO_MP
+        else _ESTADO_PENDIENTE
+    )
+
     pedido = Pedido(
         usuario_id=usuario_id,
         direccion_id=data.direccion_id,
-        estado_codigo=_ESTADO_PENDIENTE,
+        estado_codigo=estado_inicial,
         forma_pago_codigo=data.forma_pago_codigo,
         subtotal=subtotal,
         descuento=descuento,
@@ -350,7 +364,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     uow.pedidos.add_historial(HistorialEstadoPedido(
         pedido_id=pedido.id,
         estado_desde=None,
-        estado_hacia=_ESTADO_PENDIENTE,
+        estado_hacia=estado_inicial,
         usuario_id=usuario_id,
         motivo=None,
     ))
@@ -549,7 +563,57 @@ async def emit_ws_evento(pedido_id: int, estado: str, data: dict) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Verificar pago en MP (polling desde el frontend al cerrar el popup)
+# Callbacks de MercadoPago (llamados desde el redirect del backend)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
+    """ESPERANDO_PAGO → PENDIENTE. Idempotente: si ya está PENDIENTE no hace nada."""
+    pedido = uow.pedidos.get_by_id(pedido_id)
+    if not pedido:
+        _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    if pedido.estado_codigo != _ESTADO_ESPERANDO_PAGO:
+        return _build_response(uow, pedido)
+
+    estado_desde         = pedido.estado_codigo
+    pedido.estado_codigo = _ESTADO_PENDIENTE
+    pedido.updated_at    = datetime.utcnow()
+    uow.pedidos.add(pedido)
+
+    uow.pedidos.add_historial(HistorialEstadoPedido(
+        pedido_id=pedido.id,
+        estado_desde=estado_desde,
+        estado_hacia=_ESTADO_PENDIENTE,
+        usuario_id=None,
+        motivo="Pago confirmado por MercadoPago",
+    ))
+    return _build_response(uow, pedido)
+
+
+def cancelar_pago_mp(uow, pedido_id: int) -> None:
+    """ESPERANDO_PAGO → CANCELADO y restaura stock. Idempotente."""
+    pedido = uow.pedidos.get_by_id(pedido_id)
+    if not pedido or pedido.estado_codigo != _ESTADO_ESPERANDO_PAGO:
+        return
+
+    _restaurar_stock_pedido(uow, pedido)
+
+    estado_desde         = pedido.estado_codigo
+    pedido.estado_codigo = _ESTADO_CANCELADO
+    pedido.updated_at    = datetime.utcnow()
+    uow.pedidos.add(pedido)
+
+    uow.pedidos.add_historial(HistorialEstadoPedido(
+        pedido_id=pedido.id,
+        estado_desde=estado_desde,
+        estado_hacia=_ESTADO_CANCELADO,
+        usuario_id=None,
+        motivo="Pago cancelado o rechazado en MercadoPago",
+    ))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Verificar pago en MP (legacy — mantenido por compatibilidad)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def verificar_pago_mp(uow, pedido_id: int, usuario_id: int) -> dict:
