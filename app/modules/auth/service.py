@@ -114,6 +114,7 @@ class AuthService:
                 credential,
                 google_requests.Request(),
                 settings.GOOGLE_CLIENT_ID,
+                clock_skew_in_seconds=10,
             )
         except ValueError:
             _problem("INVALID_GOOGLE_TOKEN", "Token de Google inválido o expirado", status.HTTP_401_UNAUTHORIZED)
