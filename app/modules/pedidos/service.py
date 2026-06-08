@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Optional, Set
 from fastapi import HTTPException, status
 
+from app.core.config import settings
 from app.modules.pedidos.model import Pedido, DetallePedido, HistorialEstadoPedido
 from app.modules.pedidos.schemas import (
     PedidoCreate, PedidoResponse, PedidoListItem, PaginatedPedidos,
@@ -58,6 +59,7 @@ _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
 _COSTO_ENVIO_DEFAULT = Decimal("50.00")
 _ESTADO_PENDIENTE    = "PENDIENTE"
 _ESTADO_CANCELADO    = "CANCELADO"
+_FORMA_PAGO_MP       = "MERCADOPAGO"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -71,7 +73,7 @@ def _problem(code: str, detail: str, http_status: int):
     )
 
 
-def _build_response(uow, pedido: Pedido) -> PedidoResponse:
+def _build_response(uow, pedido: Pedido, init_point: Optional[str] = None) -> PedidoResponse:
     detalles = uow.pedidos.get_detalles(pedido.id)
     return PedidoResponse(
         id=pedido.id,
@@ -87,7 +89,49 @@ def _build_response(uow, pedido: Pedido) -> PedidoResponse:
         created_at=pedido.created_at,
         updated_at=pedido.updated_at,
         detalles=[DetallePedidoResponse.model_validate(d) for d in detalles],
+        init_point=init_point,
     )
+
+
+def _crear_preferencia_mp(pedido: Pedido, detalles: list) -> tuple[str, str]:
+    """Crea una preferencia en MercadoPago. Retorna (preference_id, init_point)."""
+    import mercadopago
+    sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)
+
+    preference_data = {
+        "items": [
+            {
+                "id": str(d.producto_id),
+                "title": d.nombre_snapshot,
+                "quantity": int(d.cantidad),
+                "unit_price": float(d.precio_snapshot),
+                "currency_id": "ARS",
+            }
+            for d in detalles
+        ],
+        "back_urls": {
+            "success": f"{settings.FRONTEND_URL}/pedido-exitoso",
+            "failure": f"{settings.FRONTEND_URL}/pedido-exitoso",
+            "pending": f"{settings.FRONTEND_URL}/pedido-exitoso",
+        },
+        "external_reference": str(pedido.id),
+        "statement_descriptor": "Food Store",
+    }
+
+    response = sdk.preference().create(preference_data)
+    if response["status"] not in (200, 201):
+        mp_error = response.get("response", {})
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "detail": f"MP error {response['status']}: {mp_error}",
+                "code": "MP_PREFERENCE_ERROR",
+            },
+        )
+
+    preference = response["response"]
+    checkout_url = preference["init_point"]
+    return preference["id"], checkout_url
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -258,7 +302,14 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     for ing_id, cantidad_req in requerido.items():
         ing = uow.ingredientes.get_by_id(ing_id)
         if not ing:
-            _problem("INSUMO_NOT_FOUND", f"Insumo {ing_id} no encontrado", status.HTTP_404_NOT_FOUND)
+            # Ingrediente dado de baja → avisar en términos de disponibilidad de producto
+            _problem(
+                "PRODUCTO_NO_DISPONIBLE",
+                "Uno o más productos del pedido no están disponibles actualmente "
+                "porque contienen ingredientes dados de baja. "
+                "Actualizá la página e intentá con otro producto.",
+                status.HTTP_409_CONFLICT,
+            )
         if ing.stock_cantidad < cantidad_req:
             _problem(
                 "STOCK_INSUFICIENTE",
@@ -304,7 +355,14 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
         motivo=None,
     ))
 
-    return _build_response(uow, pedido)
+    # 7. MercadoPago: crear preferencia de pago si corresponde
+    init_point = None
+    if data.forma_pago_codigo == _FORMA_PAGO_MP:
+        preference_id, init_point = _crear_preferencia_mp(pedido, detalles_a_insertar)
+        pedido.mp_preference_id = preference_id
+        uow.pedidos.add(pedido)
+
+    return _build_response(uow, pedido, init_point=init_point)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -445,3 +503,39 @@ def cancelar_pedido_cliente(
     ))
 
     return _build_response(uow, pedido)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Verificar pago en MP (polling desde el frontend al cerrar el popup)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def verificar_pago_mp(uow, pedido_id: int, usuario_id: int) -> dict:
+    """Consulta la API de pagos de MP para saber si el pedido fue pagado."""
+    import mercadopago
+
+    pedido = uow.pedidos.get_by_id_for_user(pedido_id, usuario_id)
+    if not pedido:
+        _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    if pedido.forma_pago_codigo != _FORMA_PAGO_MP:
+        _problem("NOT_MP_PAYMENT", "Este pedido no usa MercadoPago", status.HTTP_400_BAD_REQUEST)
+
+    sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)
+    result = sdk.payment().search({
+        "external_reference": str(pedido_id),
+        "sort": "date_created",
+        "criteria": "desc",
+    })
+
+    if result["status"] != 200:
+        return {"status": "not_found", "payment_id": None}
+
+    payments = result["response"].get("results", [])
+    if not payments:
+        return {"status": "not_found", "payment_id": None}
+
+    payment = payments[0]
+    return {
+        "status": payment.get("status", "unknown"),
+        "payment_id": payment.get("id"),
+    }

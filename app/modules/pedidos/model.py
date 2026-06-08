@@ -69,6 +69,8 @@ class Pedido(SQLModel, table=True):
 
     notas: Optional[str] = Field(default=None)
 
+    mp_preference_id: Optional[str] = Field(default=None, max_length=200)
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)
     deleted_at: Optional[datetime] = Field(default=None)

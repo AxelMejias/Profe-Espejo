@@ -96,6 +96,7 @@ class PedidoResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     detalles: List[DetallePedidoResponse] = []
+    init_point: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

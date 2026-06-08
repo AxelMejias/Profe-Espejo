@@ -75,6 +75,16 @@ def obtener_pedido(
         )
 
 
+@router.get("/{pedido_id}/verificar-pago", summary="Verificar estado de pago en MercadoPago")
+def verificar_pago(
+    pedido_id: Annotated[int, Path(ge=1)],
+    usuario_id: int = Depends(get_current_user_id),
+    _=_AUTENTICADO,
+):
+    with UnitOfWork() as uow:
+        return service.verificar_pago_mp(uow, pedido_id, usuario_id)
+
+
 @router.get("/{pedido_id}/historial",
             response_model=list[HistorialEstadoResponse],
             summary="Historial completo de transiciones del pedido")
