@@ -65,6 +65,7 @@ class ProductoRead(BaseModel):
     margen_ganancia: Decimal
     costo_total_insumos: Decimal       # suma de subtotales
     disponible: bool
+    destacado: bool = False
     categorias: List[CategoriaSimple]
     insumos: List[InsumoEnProductoRead]
     created_at: datetime

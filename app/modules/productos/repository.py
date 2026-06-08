@@ -37,12 +37,15 @@ class ProductoRepository(BaseRepository[Producto]):
         precio_max: Optional[float] = None,
         categoria_ids: Optional[List[int]] = None,
         solo_disponibles: bool = True,
+        solo_destacados: bool = False,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Producto], int]:
         query = select(Producto).where(Producto.deleted_at == None)
         if solo_disponibles:
             query = query.where(Producto.disponible == True)
+        if solo_destacados:
+            query = query.where(Producto.destacado == True)
         if nombre:
             query = query.where(Producto.nombre.icontains(nombre))
         if precio_min is not None:
@@ -57,6 +60,11 @@ class ProductoRepository(BaseRepository[Producto]):
         offset = (page - 1) * size
         items = list(self.session.exec(query.offset(offset).limit(size)).all())
         return items, total
+
+    def count_destacados(self) -> int:
+        return len(self.session.exec(
+            select(Producto).where(Producto.deleted_at == None, Producto.destacado == True)
+        ).all())
 
     def get_categorias(self, producto_id: int) -> List[Categoria]:
         stmt = (

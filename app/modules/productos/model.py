@@ -29,6 +29,7 @@ class Producto(SQLModel, table=True):
 
     image_url: Optional[str] = Field(default=None, max_length=500)
     disponible: bool = Field(default=True)
+    destacado: bool = Field(default=False)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)

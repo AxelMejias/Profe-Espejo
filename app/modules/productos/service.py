@@ -61,6 +61,7 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
         margen_ganancia=producto.margen_ganancia,
         costo_total_insumos=costo_total,
         disponible=producto.disponible,
+        destacado=producto.destacado,
         categorias=categorias_read,
         insumos=insumos_read,
         created_at=producto.created_at,
@@ -83,10 +84,10 @@ def get_all(
     precio_max: Optional[float] = None,
     categoria_id: Optional[int] = None,
     solo_disponibles: bool = True,
+    solo_destacados: bool = False,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedProductos:
-    # Expand categoria_id to include all descendant category IDs
     categoria_ids = uow.categorias.get_descendant_ids(categoria_id) if categoria_id else None
     items, total = uow.productos.get_all(
         nombre=nombre,
@@ -94,6 +95,7 @@ def get_all(
         precio_max=precio_max,
         categoria_ids=categoria_ids,
         solo_disponibles=solo_disponibles,
+        solo_destacados=solo_destacados,
         page=page,
         size=size,
     )
@@ -102,6 +104,24 @@ def get_all(
         total=total, page=page, size=size,
         pages=math.ceil(total / size) if total else 0,
     )
+
+
+def toggle_destacado(uow, producto_id: int, destacar: bool) -> ProductoRead:
+    producto = uow.productos.get_by_id(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+    if destacar and not producto.destacado:
+        total_destacados = uow.productos.count_destacados()
+        if total_destacados >= 4:
+            _problem(
+                "DESTACADOS_LIMIT",
+                "Ya hay 4 productos destacados. Quitá uno antes de destacar otro.",
+                status.HTTP_409_CONFLICT,
+            )
+    producto.destacado = destacar
+    producto.updated_at = datetime.utcnow()
+    uow.productos.add(producto)
+    return _build_response(uow, producto)
 
 
 def get_by_id(uow, producto_id: int) -> ProductoRead:

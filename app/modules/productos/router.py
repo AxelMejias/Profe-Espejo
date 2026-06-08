@@ -234,6 +234,7 @@ def listar_productos(
     precio_max:       Annotated[Optional[float], Query(ge=0)]           = None,
     categoria_id:     Annotated[Optional[int],   Query(ge=1)]           = None,
     solo_disponibles: Annotated[bool, Query()]                          = True,
+    solo_destacados:  Annotated[bool, Query()]                          = False,
     page:             Annotated[int, Query(ge=1)]                       = 1,
     size:             Annotated[int, Query(ge=1, le=100)]               = 20,
     _=_PUBLICO,
@@ -242,7 +243,7 @@ def listar_productos(
         return service.get_all(
             uow, nombre=nombre, precio_min=precio_min, precio_max=precio_max,
             categoria_id=categoria_id, solo_disponibles=solo_disponibles,
-            page=page, size=size,
+            solo_destacados=solo_destacados, page=page, size=size,
         )
 
 
@@ -297,6 +298,16 @@ def toggle_disponibilidad(
 ):
     with UnitOfWork() as uow:
         return service.toggle_disponibilidad(uow, producto_id, disponible)
+
+
+@router.patch("/{producto_id}/destacar", response_model=ProductoRead, summary="Toggle destacado en Home")
+def toggle_destacado(
+    producto_id: Annotated[int, Path(ge=1)],
+    destacado: bool = Body(..., embed=True),
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.toggle_destacado(uow, producto_id, destacado)
 
 
 @router.delete("/{producto_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de producto")
