@@ -99,6 +99,19 @@ async def mp_callback(
     return RedirectResponse(url=url, status_code=302)
 
 
+@router.post("/{pedido_id}/confirmar-pago-mp", response_model=PedidoResponse,
+             summary="Confirmar pago MP desde el frontend (ESPERANDO_PAGO → PENDIENTE)")
+async def confirmar_pago_mp(
+    pedido_id: Annotated[int, Path(ge=1)],
+    usuario_id: int = Depends(get_current_user_id),
+    _=_CLIENT,
+):
+    with UnitOfWork() as uow:
+        result = service.confirmar_pago_mp(uow, pedido_id)
+    await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+    return result
+
+
 @router.get("/{pedido_id}", response_model=PedidoResponse, summary="Obtener pedido por ID")
 def obtener_pedido(
     pedido_id: Annotated[int, Path(ge=1)],

@@ -3,6 +3,8 @@ Service de Pedidos.
 Regla: NO crea su propio UoW. Recibe `uow` del router.
 """
 import math
+import urllib.request
+import json as _json
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Set
@@ -100,10 +102,39 @@ def _build_response(uow, pedido: Pedido, init_point: Optional[str] = None) -> Pe
     )
 
 
+def _get_ngrok_url() -> Optional[str]:
+    """Retorna la URL pública HTTPS de ngrok si está corriendo, o None."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=1) as r:
+            data = _json.loads(r.read())
+        for tunnel in data.get("tunnels", []):
+            if tunnel.get("proto") == "https":
+                return tunnel["public_url"].rstrip("/")
+    except Exception:
+        pass
+    return None
+
+
 def _crear_preferencia_mp(pedido: Pedido, detalles: list) -> tuple[str, str]:
     """Crea una preferencia en MercadoPago. Retorna (preference_id, init_point)."""
     import mercadopago
     sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)
+
+    ngrok_url = _get_ngrok_url()
+    base_back = ngrok_url or settings.BACKEND_URL
+
+    if ngrok_url:
+        back_urls = {
+            "success": f"{ngrok_url}/api/v1/pedidos/mp-callback/success?pedido_id={pedido.id}",
+            "failure": f"{ngrok_url}/api/v1/pedidos/mp-callback/failure?pedido_id={pedido.id}",
+            "pending": f"{ngrok_url}/api/v1/pedidos/mp-callback/pending?pedido_id={pedido.id}",
+        }
+    else:
+        back_urls = {
+            "success": f"{settings.FRONTEND_URL}/pedido-exitoso?collection_status=approved&external_reference={pedido.id}",
+            "failure": f"{base_back}/api/v1/pedidos/mp-callback/failure?pedido_id={pedido.id}",
+            "pending": f"{settings.FRONTEND_URL}/pedido-exitoso?collection_status=pending&external_reference={pedido.id}",
+        }
 
     preference_data = {
         "items": [
@@ -116,13 +147,10 @@ def _crear_preferencia_mp(pedido: Pedido, detalles: list) -> tuple[str, str]:
             }
             for d in detalles
         ],
-        "back_urls": {
-            "success": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/success?pedido_id={pedido.id}",
-            "failure": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/failure?pedido_id={pedido.id}",
-            "pending": f"{settings.BACKEND_URL}/api/v1/pedidos/mp-callback/pending?pedido_id={pedido.id}",
-        },
+        "back_urls": back_urls,
         "external_reference": str(pedido.id),
         "statement_descriptor": "Food Store",
+        **({"auto_return": "approved"} if ngrok_url else {}),
     }
 
     response = sdk.preference().create(preference_data)
