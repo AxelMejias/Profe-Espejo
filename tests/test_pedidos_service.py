@@ -9,7 +9,7 @@ El módulo más crítico del proyecto. Cubre:
   - get_by_id: ownership CLIENT vs STAFF
 """
 from decimal import Decimal
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 import pytest
 from fastapi import HTTPException
 
@@ -314,9 +314,17 @@ class TestCrearPedido:
         uow.pedidos.add_historial.assert_called_once()
 
     def test_descuenta_stock(self):
-        uow, producto, _ = self._setup_uow_crear(stock=10)
-        producto.stock_cantidad = 10
+        """El stock del insumo se reduce según los links producto→insumo."""
+        uow, _, _ = self._setup_uow_crear(stock=10)
         uow.pedidos.add.side_effect = self._set_pedido_id
+
+        ing = MagicMock()
+        ing.stock_cantidad = Decimal("10")
+        link = MagicMock()
+        link.ingrediente_id = 99
+        link.cantidad = Decimal("1")  # 1 unidad de insumo por unidad de producto
+        uow.productos.get_ingrediente_links.return_value = [link]
+        uow.ingredientes.get_by_id.return_value = ing
 
         data = PedidoCreate(
             forma_pago_codigo="EFECTIVO",
@@ -324,7 +332,7 @@ class TestCrearPedido:
         )
         service.crear_pedido(uow, data, usuario_id=1)
 
-        assert producto.stock_cantidad == 7
+        assert ing.stock_cantidad == Decimal("7")  # 10 - (1 × 3)
 
     def test_primer_historial_estado_desde_null(self):
         """RN-02: el primer historial tiene estado_desde=None."""
@@ -342,9 +350,10 @@ class TestCrearPedido:
         assert entry.estado_hacia == "PENDIENTE"
 
     def test_costo_envio_por_defecto(self):
-        """El costo de envío por defecto es $50."""
+        """Con dirección de entrega, el costo de envío por defecto es $50."""
         uow, producto, _ = self._setup_uow_crear()
         producto.precio = Decimal("100.00")
+        uow.direcciones.get_by_id_for_user.return_value = MagicMock()  # dirección válida
 
         pedido_creado = None
         def capture_pedido(p):
@@ -356,6 +365,7 @@ class TestCrearPedido:
 
         data = PedidoCreate(
             forma_pago_codigo="EFECTIVO",
+            direccion_id=1,  # con dirección se activa el costo de envío
             items=[ItemPedidoRequest(producto_id=1, cantidad=2)],
         )
         service.crear_pedido(uow, data, usuario_id=1)
@@ -424,7 +434,18 @@ class TestCrearPedido:
         assert exc.value.detail["code"] == "PRODUCTO_NO_DISPONIBLE"
 
     def test_stock_insuficiente_lanza_409(self):
+        """El check de stock falla cuando el insumo no alcanza para el pedido."""
         uow, _, _ = self._setup_uow_crear(stock=2)
+
+        # Configurar link e insumo con stock insuficiente
+        link = MagicMock()
+        link.ingrediente_id = 99
+        link.cantidad = Decimal("1")  # 1 unidad de insumo por unidad de producto
+        uow.productos.get_ingrediente_links.return_value = [link]
+
+        ing = MagicMock()
+        ing.stock_cantidad = Decimal("2")  # solo hay 2 unidades disponibles
+        uow.ingredientes.get_by_id.return_value = ing
 
         data = PedidoCreate(
             forma_pago_codigo="EFECTIVO",
@@ -553,10 +574,230 @@ class TestFSMMap:
     def test_en_camino_solo_va_a_entregado(self):
         assert service._TRANSICIONES_VALIDAS["EN_CAMINO"] == {"ENTREGADO"}
 
-    def test_client_solo_puede_cancelar_desde_pendiente_y_confirmado(self):
-        permitidos = {"PENDIENTE", "CONFIRMADO"}
+    def test_client_puede_cancelar_desde_estados_abiertos(self):
+        """CLIENT puede cancelar desde ESPERANDO_PAGO, PENDIENTE y CONFIRMADO."""
+        permitidos = {"ESPERANDO_PAGO", "PENDIENTE", "CONFIRMADO"}
         for estado, destinos in service._TRANSICIONES_CLIENT.items():
-            if estado in permitidos:
-                assert "CANCELADO" in destinos
-            else:
-                assert "CANCELADO" not in destinos
+            assert "CANCELADO" in destinos, (
+                f"CANCELADO debería ser alcanzable desde {estado}"
+            )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MercadoPago — crear_pedido con forma_pago=MERCADOPAGO
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestCrearPedidoMP:
+    """
+    Verifica que al elegir MERCADOPAGO como forma de pago:
+      - Se llama al SDK de MP para crear la preferencia.
+      - Se guarda el preference_id en el pedido.
+      - La respuesta incluye el init_point (URL de checkout).
+      - Un error del SDK eleva 502 BAD GATEWAY.
+    """
+
+    def _setup_uow_mp(self):
+        """UoW configurado para pedido con MERCADOPAGO como forma de pago."""
+        uow = make_uow()
+
+        forma_pago = MagicMock()
+        forma_pago.habilitado = True
+        forma_pago.codigo = "MERCADOPAGO"
+        uow.formas_pago.get_by_codigo.return_value = forma_pago
+
+        uow.estados_pedido.get_by_codigo.return_value = MagicMock()
+
+        producto = mock_producto(stock_cantidad=10)
+        uow.productos.get_by_id.return_value = producto
+        # Sin insumos → la validación de stock se salta limpiamente
+        uow.productos.get_ingrediente_links.return_value = []
+
+        uow.pedidos.get_detalles.return_value = []
+        return uow
+
+    @staticmethod
+    def _asignar_id(p):
+        """Side effect para uow.pedidos.add: simula el flush del ORM asignando id=1."""
+        p.id = 1
+        return p
+
+    @staticmethod
+    def _sdk_exitoso():
+        """SDK mockeado que responde con éxito (status 201)."""
+        sdk = MagicMock()
+        sdk.preference.return_value.create.return_value = {
+            "status": 201,
+            "response": {
+                "id": "pref_test_abc",
+                "init_point": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref_test_abc",
+            },
+        }
+        return sdk
+
+    @patch("mercadopago.SDK")
+    def test_mp_llama_sdk_y_crea_preferencia(self, mock_sdk_class):
+        mock_sdk_class.return_value = self._sdk_exitoso()
+        uow = self._setup_uow_mp()
+        uow.pedidos.add.side_effect = self._asignar_id
+
+        data = PedidoCreate(
+            forma_pago_codigo="MERCADOPAGO",
+            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
+        )
+        service.crear_pedido(uow, data, usuario_id=1)
+
+        mock_sdk_class.assert_called_once()
+        mock_sdk_class.return_value.preference.return_value.create.assert_called_once()
+
+    @patch("mercadopago.SDK")
+    def test_mp_guarda_preference_id_en_pedido(self, mock_sdk_class):
+        mock_sdk_class.return_value = self._sdk_exitoso()
+        uow = self._setup_uow_mp()
+        uow.pedidos.add.side_effect = self._asignar_id
+
+        data = PedidoCreate(
+            forma_pago_codigo="MERCADOPAGO",
+            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
+        )
+        service.crear_pedido(uow, data, usuario_id=1)
+
+        # La segunda llamada a add() lleva el pedido ya con mp_preference_id asignado
+        pedido_persistido = uow.pedidos.add.call_args_list[-1][0][0]
+        assert pedido_persistido.mp_preference_id == "pref_test_abc"
+
+    @patch("mercadopago.SDK")
+    def test_mp_devuelve_init_point_en_response(self, mock_sdk_class):
+        mock_sdk_class.return_value = self._sdk_exitoso()
+        uow = self._setup_uow_mp()
+        uow.pedidos.add.side_effect = self._asignar_id
+
+        data = PedidoCreate(
+            forma_pago_codigo="MERCADOPAGO",
+            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
+        )
+        result = service.crear_pedido(uow, data, usuario_id=1)
+
+        assert result.init_point == (
+            "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref_test_abc"
+        )
+
+    @patch("mercadopago.SDK")
+    def test_mp_error_de_sdk_lanza_502(self, mock_sdk_class):
+        sdk = MagicMock()
+        sdk.preference.return_value.create.return_value = {
+            "status": 400,
+            "response": {"message": "Invalid credentials"},
+        }
+        mock_sdk_class.return_value = sdk
+        uow = self._setup_uow_mp()
+        uow.pedidos.add.side_effect = self._asignar_id
+
+        data = PedidoCreate(
+            forma_pago_codigo="MERCADOPAGO",
+            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
+        )
+        with pytest.raises(HTTPException) as exc:
+            service.crear_pedido(uow, data, usuario_id=1)
+
+        assert exc.value.status_code == 502
+        assert exc.value.detail["code"] == "MP_PREFERENCE_ERROR"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MercadoPago — verificar_pago_mp
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestVerificarPagoMP:
+    """
+    Verifica los posibles resultados al consultar el estado de un pago en MP:
+      - Pago aprobado / pendiente.
+      - Sin pagos registrados → not_found.
+      - API de MP no disponible → not_found.
+      - Pedido sin forma de pago MP → 400.
+      - Pedido no encontrado → 404.
+    """
+
+    def _setup(self, forma_pago: str = "MERCADOPAGO", usuario_id: int = 5):
+        uow = make_uow()
+        pedido = mock_pedido(id=1, usuario_id=usuario_id, forma_pago_codigo=forma_pago)
+        uow.pedidos.get_by_id_for_user.return_value = pedido
+        return uow
+
+    @patch("mercadopago.SDK")
+    def test_pago_aprobado(self, mock_sdk_class):
+        sdk = MagicMock()
+        sdk.payment.return_value.search.return_value = {
+            "status": 200,
+            "response": {"results": [{"id": 9901, "status": "approved"}]},
+        }
+        mock_sdk_class.return_value = sdk
+        uow = self._setup()
+
+        result = service.verificar_pago_mp(uow, pedido_id=1, usuario_id=5)
+
+        assert result["status"] == "approved"
+        assert result["payment_id"] == 9901
+
+    @patch("mercadopago.SDK")
+    def test_pago_pendiente(self, mock_sdk_class):
+        sdk = MagicMock()
+        sdk.payment.return_value.search.return_value = {
+            "status": 200,
+            "response": {"results": [{"id": 9902, "status": "pending"}]},
+        }
+        mock_sdk_class.return_value = sdk
+        uow = self._setup()
+
+        result = service.verificar_pago_mp(uow, pedido_id=1, usuario_id=5)
+
+        assert result["status"] == "pending"
+        assert result["payment_id"] == 9902
+
+    @patch("mercadopago.SDK")
+    def test_sin_pagos_retorna_not_found(self, mock_sdk_class):
+        sdk = MagicMock()
+        sdk.payment.return_value.search.return_value = {
+            "status": 200,
+            "response": {"results": []},
+        }
+        mock_sdk_class.return_value = sdk
+        uow = self._setup()
+
+        result = service.verificar_pago_mp(uow, pedido_id=1, usuario_id=5)
+
+        assert result["status"] == "not_found"
+        assert result["payment_id"] is None
+
+    @patch("mercadopago.SDK")
+    def test_api_mp_falla_retorna_not_found(self, mock_sdk_class):
+        sdk = MagicMock()
+        sdk.payment.return_value.search.return_value = {
+            "status": 500,
+            "response": {},
+        }
+        mock_sdk_class.return_value = sdk
+        uow = self._setup()
+
+        result = service.verificar_pago_mp(uow, pedido_id=1, usuario_id=5)
+
+        assert result["status"] == "not_found"
+        assert result["payment_id"] is None
+
+    def test_pedido_no_usa_mp_lanza_400(self):
+        uow = self._setup(forma_pago="EFECTIVO")
+
+        with pytest.raises(HTTPException) as exc:
+            service.verificar_pago_mp(uow, pedido_id=1, usuario_id=5)
+
+        assert exc.value.status_code == 400
+        assert exc.value.detail["code"] == "NOT_MP_PAYMENT"
+
+    def test_pedido_no_encontrado_lanza_404(self):
+        uow = make_uow()
+        uow.pedidos.get_by_id_for_user.return_value = None
+
+        with pytest.raises(HTTPException) as exc:
+            service.verificar_pago_mp(uow, pedido_id=999, usuario_id=5)
+
+        assert exc.value.status_code == 404
+        assert exc.value.detail["code"] == "PEDIDO_NOT_FOUND"
