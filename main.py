@@ -20,6 +20,8 @@ from app.modules.direcciones.model import DireccionEntrega  # noqa: F401
 from app.modules.pedidos.model import (                     # noqa: F401
     EstadoPedido, FormaPago, Pedido, DetallePedido, HistorialEstadoPedido,
 )
+from app.modules.pagos.model import Pago                    # noqa: F401
+from app.modules.unidades.model import UnidadMedida         # noqa: F401
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 from app.modules.auth.router         import router as auth_router
@@ -28,6 +30,8 @@ from app.modules.ingredientes.router import router as ingredientes_router
 from app.modules.productos.router    import router as productos_router
 from app.modules.direcciones.router  import router as direcciones_router
 from app.modules.pedidos.router      import router as pedidos_router
+from app.modules.pagos.router        import router as pagos_router
+from app.modules.unidades.router     import router as unidades_router
 from app.modules.admin.router        import router as admin_router   # ← NUEVO
 
 limiter = Limiter(key_func=get_remote_address)
@@ -99,6 +103,8 @@ app.include_router(ingredientes_router)
 app.include_router(productos_router)
 app.include_router(direcciones_router)
 app.include_router(pedidos_router)
+app.include_router(pagos_router)
+app.include_router(unidades_router)
 app.include_router(admin_router)
 
 

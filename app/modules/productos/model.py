@@ -31,6 +31,9 @@ class Producto(SQLModel, table=True):
     disponible: bool = Field(default=True)
     destacado: bool = Field(default=False)
 
+    # FK → UnidadMedida (unidad de venta del producto, opcional)
+    unidad_venta_id: Optional[int] = Field(default=None, foreign_key="unidad_medida.id")
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)
     deleted_at: Optional[datetime] = Field(default=None)

@@ -29,6 +29,7 @@ class UnitOfWork:
         from app.modules.categorias.repository import CategoriaRepository
         from app.modules.ingredientes.repository import IngredienteRepository
         from app.modules.productos.repository import ProductoRepository
+        from app.modules.unidades.repository import UnidadMedidaRepository
 
         # Módulos implementados en Parcial 2
         from app.modules.pedidos.repository import (
@@ -49,6 +50,7 @@ class UnitOfWork:
         self.categorias = CategoriaRepository(self.session)
         self.ingredientes = IngredienteRepository(self.session)
         self.productos = ProductoRepository(self.session)
+        self.unidades = UnidadMedidaRepository(self.session)
 
         self.pedidos = PedidoRepository(self.session)
         self.estados_pedido = EstadoPedidoRepository(self.session)

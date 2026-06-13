@@ -34,6 +34,7 @@ class ProductoCreate(BaseModel):
     image_url: Optional[str] = Field(default=None, max_length=500)
     margen_ganancia: Decimal = Field(ge=Decimal("0"), le=Decimal("10"))
     disponible: bool = True
+    unidad_venta_id: Optional[int] = Field(default=None, gt=0)
     categoria_ids: List[int] = Field(default_factory=list)
     insumos: List[InsumoEnProductoCreate] = Field(min_length=1)
 
@@ -44,6 +45,7 @@ class ProductoUpdate(BaseModel):
     image_url: Optional[str] = Field(default=None, max_length=500)
     margen_ganancia: Optional[Decimal] = Field(default=None, ge=0, le=10)
     disponible: Optional[bool] = None
+    unidad_venta_id: Optional[int] = Field(default=None, gt=0)
     categoria_ids: Optional[List[int]] = None
     insumos: Optional[List[InsumoEnProductoCreate]] = None
 
@@ -66,6 +68,8 @@ class ProductoRead(BaseModel):
     costo_total_insumos: Decimal       # suma de subtotales
     disponible: bool
     destacado: bool = False
+    unidad_venta_id: Optional[int] = None
+    unidad_venta_simbolo: Optional[str] = None
     categorias: List[CategoriaSimple]
     insumos: List[InsumoEnProductoRead]
     created_at: datetime

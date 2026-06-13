@@ -4,6 +4,7 @@ from app.core.security import hash_password
 
 from app.modules.auth.model import Rol, Usuario, UsuarioRol
 from app.modules.pedidos.model import EstadoPedido, FormaPago
+from app.modules.unidades.model import UnidadMedida
 from app.modules.direcciones.model import DireccionEntrega  # noqa: F401 — registra el mapper
 
 
@@ -12,10 +13,26 @@ def seed():
         _seed_roles(session)
         _seed_estados_pedido(session)
         _seed_formas_pago(session)
+        _seed_unidades(session)
         _seed_admin(session)
         _seed_cocina(session)
         _seed_stock(session)
         print("Seed completado.")
+
+
+def _seed_unidades(session: Session):
+    unidades = [
+        UnidadMedida(nombre="kilogramo", simbolo="kg",        tipo="peso"),
+        UnidadMedida(nombre="gramo",     simbolo="g",         tipo="peso"),
+        UnidadMedida(nombre="litro",     simbolo="L",         tipo="volumen"),
+        UnidadMedida(nombre="mililitro", simbolo="ml",        tipo="volumen"),
+        UnidadMedida(nombre="unidad",    simbolo="ud",        tipo="contable"),
+        UnidadMedida(nombre="porción",   simbolo="porciones", tipo="contable"),
+    ]
+    for u in unidades:
+        if not session.exec(select(UnidadMedida).where(UnidadMedida.nombre == u.nombre)).first():
+            session.add(u)
+    session.commit()
 
 
 def _seed_roles(session: Session):
@@ -33,6 +50,7 @@ def _seed_roles(session: Session):
 
 def _seed_estados_pedido(session: Session):
     estados = [
+        EstadoPedido(codigo="ESPERANDO_PAGO", descripcion="Esperando confirmación de pago", orden=0, es_terminal=False),
         EstadoPedido(codigo="PENDIENTE",  descripcion="Pendiente de confirmación", orden=1, es_terminal=False),
         EstadoPedido(codigo="CONFIRMADO", descripcion="Confirmado",                orden=2, es_terminal=False),
         EstadoPedido(codigo="EN_PREP",    descripcion="En preparación",            orden=3, es_terminal=False),
@@ -47,12 +65,11 @@ def _seed_estados_pedido(session: Session):
 
 
 def _seed_formas_pago(session: Session):
-    # Nota: la lógica funcional de MercadoPago está fuera de alcance (Parcial 2).
-    # La tabla existe a nivel estructura para respetar el diagrama UML.
+    # MercadoPago Checkout API operativo (módulo pagos + webhook IPN).
     formas = [
         FormaPago(codigo="EFECTIVO",     descripcion="Efectivo",                  habilitado=True),
         FormaPago(codigo="TRANSFERENCIA", descripcion="Transferencia bancaria",     habilitado=True),
-        FormaPago(codigo="MERCADOPAGO",  descripcion="MercadoPago",                habilitado=False),
+        FormaPago(codigo="MERCADOPAGO",  descripcion="MercadoPago",                habilitado=True),
     ]
     for forma in formas:
         if not session.exec(select(FormaPago).where(FormaPago.codigo == forma.codigo)).first():

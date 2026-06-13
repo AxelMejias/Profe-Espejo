@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     MP_ACCESS_TOKEN: str = ""
     MP_PUBLIC_KEY: str = ""
     MP_SANDBOX: bool = True
+    # Secreto de la firma del webhook IPN (panel de MP → Webhooks → clave secreta)
+    MP_WEBHOOK_SECRET: str = ""
+    # URL pública del webhook IPN. Si está vacía y no hay ngrok, se omite
+    # notification_url en la preferencia (MP usa la configurada en el panel).
+    MP_NOTIFICATION_URL: str = ""
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: str = ""

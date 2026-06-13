@@ -52,6 +52,11 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
         for c in producto.categorias
     ]
 
+    unidad_simbolo = None
+    if producto.unidad_venta_id:
+        unidad = uow.unidades.get_by_id(producto.unidad_venta_id)
+        unidad_simbolo = unidad.simbolo if unidad else None
+
     return ProductoRead(
         id=producto.id,
         nombre=producto.nombre,
@@ -62,6 +67,8 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
         costo_total_insumos=costo_total,
         disponible=producto.disponible,
         destacado=producto.destacado,
+        unidad_venta_id=producto.unidad_venta_id,
+        unidad_venta_simbolo=unidad_simbolo,
         categorias=categorias_read,
         insumos=insumos_read,
         created_at=producto.created_at,
@@ -152,6 +159,9 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
 
     precio = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
 
+    if data.unidad_venta_id and not uow.unidades.get_by_id(data.unidad_venta_id):
+        _problem("UNIDAD_NOT_FOUND", f"Unidad de medida {data.unidad_venta_id} no encontrada", status.HTTP_404_NOT_FOUND)
+
     producto = Producto(
         nombre=data.nombre,
         descripcion=data.descripcion,
@@ -159,6 +169,7 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
         precio=precio,
         margen_ganancia=data.margen_ganancia,
         disponible=data.disponible,
+        unidad_venta_id=data.unidad_venta_id,
     )
     uow.productos.add(producto)
 
@@ -186,6 +197,11 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
         val = getattr(data, field)
         if val is not None:
             setattr(producto, field, val)
+
+    if data.unidad_venta_id is not None:
+        if not uow.unidades.get_by_id(data.unidad_venta_id):
+            _problem("UNIDAD_NOT_FOUND", f"Unidad de medida {data.unidad_venta_id} no encontrada", status.HTTP_404_NOT_FOUND)
+        producto.unidad_venta_id = data.unidad_venta_id
 
     if data.insumos is not None:
         uow.productos.delete_ingrediente_links(producto_id)
