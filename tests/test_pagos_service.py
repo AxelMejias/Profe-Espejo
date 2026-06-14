@@ -296,34 +296,47 @@ class TestCrearPreferenciaYPago:
 
     @patch("app.modules.pagos.service._get_ngrok_url", return_value="https://abc123.ngrok.io")
     @patch("mercadopago.SDK")
-    def test_back_urls_apuntan_al_frontend_no_a_ngrok(self, mock_sdk, _ngrok):
-        """El redirect del browser va al frontend, nunca a ngrok (evita el interstitial)."""
+    def test_back_urls_pasan_por_el_redirect_del_backend(self, mock_sdk, _ngrok):
+        """Con ngrok, los back_urls apuntan al endpoint redirect del backend (HTTPS válida
+        para MP). Ese endpoint hace luego un 302 al frontend (/pedido-exitoso)."""
         sdk = self._sdk_exitoso()
         mock_sdk.return_value = sdk
         uow = make_uow()
+        pedido = self._pedido()
 
-        service.crear_preferencia_y_pago(uow, self._pedido(), [self._detalle()])
+        service.crear_preferencia_y_pago(uow, pedido, [self._detalle()])
 
         pd = sdk.preference.return_value.create.call_args[0][0]
         for key in ("success", "failure", "pending"):
             url = pd["back_urls"][key]
-            assert url.startswith(settings.FRONTEND_URL), f"{key} no apunta al frontend: {url}"
-            assert "ngrok" not in url
-            assert "mp-callback" not in url
+            assert url == f"https://abc123.ngrok.io/api/v1/pagos/redirect/{pedido.id}/{key}"
 
-    @patch("app.modules.pagos.service._get_ngrok_url", return_value="https://abc123.ngrok.io")
+    @patch("app.modules.pagos.service._get_ngrok_url", return_value=None)
     @patch("mercadopago.SDK")
-    def test_auto_return_omitido_si_frontend_localhost(self, mock_sdk, _ngrok, monkeypatch):
-        """auto_return solo si el frontend es https (MP rechaza auto_return con localhost)."""
+    def test_auto_return_omitido_sin_ngrok(self, mock_sdk, _ngrok):
+        """auto_return requiere back_urls HTTPS (las provee ngrok). Sin ngrok corriendo,
+        los back_urls caen a localhost y auto_return se omite (MP lo rechazaría)."""
         sdk = self._sdk_exitoso()
         mock_sdk.return_value = sdk
-        monkeypatch.setattr(settings, "FRONTEND_URL", "http://localhost:5173")
         uow = make_uow()
 
         service.crear_preferencia_y_pago(uow, self._pedido(), [self._detalle()])
 
         pd = sdk.preference.return_value.create.call_args[0][0]
         assert "auto_return" not in pd
+
+    @patch("app.modules.pagos.service._get_ngrok_url", return_value="https://abc123.ngrok.io")
+    @patch("mercadopago.SDK")
+    def test_auto_return_presente_con_ngrok(self, mock_sdk, _ngrok):
+        """Con ngrok (back_urls HTTPS), se incluye auto_return='approved'."""
+        sdk = self._sdk_exitoso()
+        mock_sdk.return_value = sdk
+        uow = make_uow()
+
+        service.crear_preferencia_y_pago(uow, self._pedido(), [self._detalle()])
+
+        pd = sdk.preference.return_value.create.call_args[0][0]
+        assert pd.get("auto_return") == "approved"
 
     @patch("app.modules.pagos.service._get_ngrok_url", return_value=None)
     @patch("mercadopago.SDK")
