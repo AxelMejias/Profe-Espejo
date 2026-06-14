@@ -3,7 +3,7 @@ Service de Pedidos.
 Regla: NO crea su propio UoW. Recibe `uow` del router.
 """
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Set
 from fastapi import HTTPException, status
@@ -20,22 +20,17 @@ from app.modules.pedidos.schemas import (
 # FSM — mapa de transiciones válidas (única fuente de verdad)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# FSM v7 — exactamente 5 estados (se elimina EN_CAMINO; sin ESPERANDO_PAGO).
 _TRANSICIONES_VALIDAS: dict[str, Set[str]] = {
-    "ESPERANDO_PAGO": {"PENDIENTE", "CANCELADO"},
     "PENDIENTE":  {"CONFIRMADO", "CANCELADO"},
     "CONFIRMADO": {"EN_PREP",    "CANCELADO"},
-    "EN_PREP":    {"EN_CAMINO",  "CANCELADO"},
-    "EN_CAMINO":  {"ENTREGADO"},
+    "EN_PREP":    {"ENTREGADO",  "CANCELADO"},
     "ENTREGADO":  set(),                         # terminal
     "CANCELADO":  set(),                         # terminal
 }
 
 # RBAC por transición: estado_desde → estado_hacia → roles autorizados
 _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
-    "ESPERANDO_PAGO": {
-        "PENDIENTE":  {"ADMIN", "PEDIDOS"},
-        "CANCELADO":  {"ADMIN", "PEDIDOS"},
-    },
     "PENDIENTE":  {
         "CONFIRMADO": {"ADMIN", "PEDIDOS"},
         "CANCELADO":  {"ADMIN", "PEDIDOS"},
@@ -45,11 +40,8 @@ _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
         "CANCELADO": {"ADMIN"},
     },
     "EN_PREP":    {
-        "EN_CAMINO": {"ADMIN", "PEDIDOS"},
-        "CANCELADO": {"ADMIN", "PEDIDOS"},
-    },
-    "EN_CAMINO":  {
         "ENTREGADO": {"ADMIN", "PEDIDOS"},
+        "CANCELADO": {"ADMIN", "PEDIDOS"},
     },
 }
 
@@ -57,14 +49,13 @@ _PERMISOS_TRANSICION: dict[str, dict[str, Set[str]]] = {
 _ROLES_STAFF = {"ADMIN", "PEDIDOS"}
 
 _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
-    "ESPERANDO_PAGO": {"CANCELADO"},
     "PENDIENTE":  {"CANCELADO"},
     "CONFIRMADO": {"CANCELADO"},
 }
 
 _COSTO_ENVIO_DEFAULT    = Decimal("50.00")
-_ESTADO_ESPERANDO_PAGO  = "ESPERANDO_PAGO"
 _ESTADO_PENDIENTE       = "PENDIENTE"
+_ESTADO_CONFIRMADO      = "CONFIRMADO"
 _ESTADO_CANCELADO       = "CANCELADO"
 _FORMA_PAGO_MP          = "MERCADOPAGO"
 
@@ -82,9 +73,11 @@ def _problem(code: str, detail: str, http_status: int):
 
 def _build_response(uow, pedido: Pedido, init_point: Optional[str] = None) -> PedidoResponse:
     detalles = uow.pedidos.get_detalles(pedido.id)
-    # Exponer init_point cuando el pedido todavía espera pago (para reintentar)
+    # Exponer init_point mientras el pago MP no se confirmó (para reintentar el checkout)
     resolved_init_point = init_point or (
-        pedido.mp_init_point if pedido.estado_codigo == _ESTADO_ESPERANDO_PAGO else None
+        pedido.mp_init_point
+        if (pedido.forma_pago_codigo == _FORMA_PAGO_MP and pedido.estado_codigo == _ESTADO_PENDIENTE)
+        else None
     )
     return PedidoResponse(
         id=pedido.id,
@@ -133,12 +126,9 @@ def get_all(
     ADMIN / PEDIDOS ⇒ ven todos.
     """
     es_staff = any(r in _ROLES_STAFF for r in requester_roles)
-    # Staff no ve pedidos ESPERANDO_PAGO (pago no confirmado = no formalizado)
-    excluir_estados = [_ESTADO_ESPERANDO_PAGO] if es_staff else []
     items, total = uow.pedidos.get_all(
         usuario_id=None if es_staff else requester_user_id,
         estado_codigo=estado_codigo,
-        excluir_estados=excluir_estados,
         page=page, size=size,
     )
     return PaginatedPedidos(
@@ -303,12 +293,9 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
     costo_envio = _COSTO_ENVIO_DEFAULT if data.direccion_id is not None else Decimal("0.00")
     total = subtotal - descuento + costo_envio
 
-    # MP empieza en ESPERANDO_PAGO hasta que el back_url confirme el pago
-    estado_inicial = (
-        _ESTADO_ESPERANDO_PAGO
-        if data.forma_pago_codigo == _FORMA_PAGO_MP
-        else _ESTADO_PENDIENTE
-    )
+    # FSM v7: todo pedido nace en PENDIENTE. El pago MP (webhook/redirect) lo
+    # avanza a CONFIRMADO si se aprueba, o lo cancela si se rechaza.
+    estado_inicial = _ESTADO_PENDIENTE
 
     pedido = Pedido(
         usuario_id=usuario_id,
@@ -335,7 +322,8 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
         motivo=None,
     ))
 
-    # 7. MercadoPago: crear preferencia + registro Pago (delegado al módulo pagos)
+    # MercadoPago (Checkout Pro): crear preferencia + registro Pago → init_point para el redirect.
+    # El pedido queda PENDIENTE hasta que el pago se confirma (webhook / back_url → CONFIRMADO).
     init_point = None
     if data.forma_pago_codigo == _FORMA_PAGO_MP:
         from app.modules.pagos import service as pagos_service
@@ -492,7 +480,6 @@ _EVENTOS_WS: dict[str, str] = {
     "PENDIENTE":  "NUEVO_PEDIDO",
     "CONFIRMADO": "PEDIDO_CONFIRMADO",
     "EN_PREP":    "PEDIDO_EN_PREPARACION",
-    "EN_CAMINO":  "PEDIDO_EN_CAMINO",
     "ENTREGADO":  "PEDIDO_ENTREGADO",
     "CANCELADO":  "PEDIDO_CANCELADO",
 }
@@ -502,7 +489,6 @@ _ROLES_POR_ESTADO: dict[str, list[str]] = {
     "PENDIENTE":  ["pedidos", "admin"],
     "CONFIRMADO": ["pedidos", "admin"],
     "EN_PREP":    ["pedidos", "admin"],
-    "EN_CAMINO":  ["pedidos", "admin"],
     "ENTREGADO":  ["pedidos", "admin"],
     "CANCELADO":  ["pedidos", "admin"],
 }
@@ -532,25 +518,25 @@ async def emit_ws_evento(pedido_id: int, estado: str, data: dict) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
-    """ESPERANDO_PAGO → PENDIENTE. Idempotente: si ya está PENDIENTE no hace nada."""
+    """PENDIENTE → CONFIRMADO al aprobarse el pago. Idempotente: si ya avanzó, no repite."""
     pedido = uow.pedidos.get_by_id(pedido_id)
     if not pedido:
         _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
 
-    if pedido.estado_codigo != _ESTADO_ESPERANDO_PAGO:
-        # Si ya pasó, al menos aseguramos que el Pago quede como approved
+    if pedido.estado_codigo != _ESTADO_PENDIENTE:
+        # Ya confirmado/avanzado: solo aseguramos que el Pago quede como approved
         _marcar_pago_approved(uow, pedido_id)
         return _build_response(uow, pedido)
 
     estado_desde         = pedido.estado_codigo
-    pedido.estado_codigo = _ESTADO_PENDIENTE
+    pedido.estado_codigo = _ESTADO_CONFIRMADO
     pedido.updated_at    = datetime.utcnow()
     uow.pedidos.add(pedido)
 
     uow.pedidos.add_historial(HistorialEstadoPedido(
         pedido_id=pedido.id,
         estado_desde=estado_desde,
-        estado_hacia=_ESTADO_PENDIENTE,
+        estado_hacia=_ESTADO_CONFIRMADO,
         usuario_id=None,
         motivo="Pago confirmado por MercadoPago",
     ))
@@ -569,36 +555,14 @@ def _marcar_pago_approved(uow, pedido_id: int) -> None:
         uow.pagos.add(pago)
 
 
-def cancelar_pedidos_expirados(uow, minutos: int = 30) -> int:
-    """
-    Cancela todos los pedidos ESPERANDO_PAGO con más de `minutos` minutos sin pago.
-    Restaura stock y registra historial con usuario_id=None (acción del sistema).
-    Retorna la cantidad de pedidos cancelados.
-    """
-    cutoff = datetime.utcnow() - timedelta(minutes=minutos)
-    pedidos = uow.pedidos.get_esperando_pago_expirados(cutoff)
-    cancelados = 0
-    for pedido in pedidos:
-        _restaurar_stock_pedido(uow, pedido)
-        estado_desde         = pedido.estado_codigo
-        pedido.estado_codigo = _ESTADO_CANCELADO
-        pedido.updated_at    = datetime.utcnow()
-        uow.pedidos.add(pedido)
-        uow.pedidos.add_historial(HistorialEstadoPedido(
-            pedido_id=pedido.id,
-            estado_desde=estado_desde,
-            estado_hacia=_ESTADO_CANCELADO,
-            usuario_id=None,
-            motivo=f"Cancelado automáticamente: sin pago confirmado en {minutos} minutos",
-        ))
-        cancelados += 1
-    return cancelados
-
-
 def cancelar_pago_mp(uow, pedido_id: int) -> None:
-    """ESPERANDO_PAGO → CANCELADO y restaura stock. Idempotente."""
+    """Pedido MP en PENDIENTE → CANCELADO al rechazarse el pago, y restaura stock. Idempotente."""
     pedido = uow.pedidos.get_by_id(pedido_id)
-    if not pedido or pedido.estado_codigo != _ESTADO_ESPERANDO_PAGO:
+    if (
+        not pedido
+        or pedido.forma_pago_codigo != _FORMA_PAGO_MP
+        or pedido.estado_codigo != _ESTADO_PENDIENTE
+    ):
         return
 
     _restaurar_stock_pedido(uow, pedido)

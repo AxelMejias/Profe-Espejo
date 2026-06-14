@@ -35,3 +35,11 @@ htmlcov/
 
 # Type checking
 .mypy_cache/
+
+# Trabajo local (no versionar)
+*.log
+/.local/
+docx_text.txt
+ngrok_reqs.json
+TPI_PROG4_FOOD_STORE_v6.md
+TPI_PROG4_FOOD_STORE_v6.pdf

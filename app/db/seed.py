@@ -1,3 +1,4 @@
+from decimal import Decimal
 from sqlmodel import Session, select
 from app.core.database import engine
 from app.core.security import hash_password
@@ -6,6 +7,10 @@ from app.modules.auth.model import Rol, Usuario, UsuarioRol
 from app.modules.pedidos.model import EstadoPedido, FormaPago
 from app.modules.unidades.model import UnidadMedida
 from app.modules.direcciones.model import DireccionEntrega  # noqa: F401 — registra el mapper
+from app.modules.categorias.model import Categoria
+from app.modules.ingredientes.model import Ingrediente
+from app.modules.productos.model import Producto
+from app.core.links import ProductoCategoria, ProductoIngrediente
 
 
 def seed():
@@ -17,6 +22,7 @@ def seed():
         _seed_admin(session)
         _seed_cocina(session)
         _seed_stock(session)
+        _seed_catalogo_demo(session)
         print("Seed completado.")
 
 
@@ -49,14 +55,13 @@ def _seed_roles(session: Session):
 
 
 def _seed_estados_pedido(session: Session):
+    # FSM v7 — exactamente 5 estados (se elimina EN_CAMINO de v5; sin ESPERANDO_PAGO).
     estados = [
-        EstadoPedido(codigo="ESPERANDO_PAGO", descripcion="Esperando confirmación de pago", orden=0, es_terminal=False),
         EstadoPedido(codigo="PENDIENTE",  descripcion="Pendiente de confirmación", orden=1, es_terminal=False),
         EstadoPedido(codigo="CONFIRMADO", descripcion="Confirmado",                orden=2, es_terminal=False),
         EstadoPedido(codigo="EN_PREP",    descripcion="En preparación",            orden=3, es_terminal=False),
-        EstadoPedido(codigo="EN_CAMINO",  descripcion="En camino",                 orden=4, es_terminal=False),
-        EstadoPedido(codigo="ENTREGADO",  descripcion="Entregado",                 orden=5, es_terminal=True),
-        EstadoPedido(codigo="CANCELADO",  descripcion="Cancelado",                 orden=6, es_terminal=True),
+        EstadoPedido(codigo="ENTREGADO",  descripcion="Entregado",                 orden=4, es_terminal=True),
+        EstadoPedido(codigo="CANCELADO",  descripcion="Cancelado",                 orden=5, es_terminal=True),
     ]
     for estado in estados:
         if not session.exec(select(EstadoPedido).where(EstadoPedido.codigo == estado.codigo)).first():
@@ -120,6 +125,117 @@ def _seed_stock(session: Session):
     session.flush()
     session.add(UsuarioRol(usuario_id=stock.id, rol_codigo="STOCK"))
     session.commit()
+
+
+def _seed_catalogo_demo(session: Session):
+    """
+    Catálogo de ejemplo para que la tienda no quede vacía en una DB nueva.
+    Idempotente: si ya hay algún producto, no hace nada.
+    El stock es por INSUMO; los productos descuentan stock de sus ingredientes.
+    """
+    if session.exec(select(Producto)).first():
+        return  # ya hay productos cargados
+
+    # ── Categorías ────────────────────────────────────────────────────────────
+    cats: dict[str, Categoria] = {}
+    for nombre, desc in [
+        ("Hamburguesas", "Nuestras burgers a la parrilla"),
+        ("Pizzas",       "Pizzas a la piedra"),
+        ("Bebidas",      "Bebidas frías"),
+        ("Postres",      "Para cerrar la comida"),
+    ]:
+        c = Categoria(nombre=nombre, descripcion=desc)
+        session.add(c)
+        cats[nombre] = c
+    session.flush()
+
+    # ── Insumos (Ingredientes con stock) ──────────────────────────────────────
+    # nombre, unidad_medida, costo_unitario, stock, es_alergeno, es_producto_terminado
+    insumo_defs = [
+        ("Pan de hamburguesa", "unidad", "80",   "1000", True,  False),
+        ("Medallón de carne",  "unidad", "250",  "1000", False, False),
+        ("Queso cheddar",      "feta",   "60",   "1000", True,  False),
+        ("Lechuga",            "gramo",  "2",     "5000", False, False),
+        ("Tomate",             "gramo",  "1.5",   "5000", False, False),
+        ("Masa de pizza",      "unidad", "150",   "500",  True,  False),
+        ("Salsa de tomate",    "ml",     "0.5",  "10000", False, False),
+        ("Mozzarella",         "gramo",  "4",     "8000", True,  False),
+        ("Gaseosa lata 354ml", "unidad", "300",   "500",  False, True),
+        ("Helado (pote)",      "gramo",  "5",     "4000", True,  False),
+    ]
+    insumos: dict[str, Ingrediente] = {}
+    for nombre, unidad, costo, stock, alergeno, terminado in insumo_defs:
+        ing = Ingrediente(
+            nombre=nombre,
+            unidad_medida=unidad,
+            costo_unitario=Decimal(costo),
+            stock_cantidad=Decimal(stock),
+            stock_minimo=Decimal("10"),
+            es_alergeno=alergeno,
+            es_producto_terminado=terminado,
+        )
+        session.add(ing)
+        insumos[nombre] = ing
+    session.flush()
+
+    ud = session.exec(select(UnidadMedida).where(UnidadMedida.simbolo == "ud")).first()
+    unidad_venta_id = ud.id if ud else None
+    margen = Decimal("0.30")
+    _REMOVIBLES = {"Lechuga", "Tomate", "Queso cheddar"}
+
+    def crear_producto(nombre, descripcion, categoria, imagen, receta):
+        """receta: lista de (nombre_insumo, cantidad)."""
+        costo = sum(insumos[n].costo_unitario * Decimal(str(c)) for n, c in receta)
+        precio = (costo * (Decimal("1") + margen)).quantize(Decimal("0.01"))
+        p = Producto(
+            nombre=nombre,
+            descripcion=descripcion,
+            imagenes_url=[imagen],
+            precio=precio,
+            margen_ganancia=margen,
+            disponible=True,
+            unidad_venta_id=unidad_venta_id,
+        )
+        session.add(p)
+        session.flush()
+        session.add(ProductoCategoria(producto_id=p.id, categoria_id=categoria.id, es_principal=True))
+        for n, c in receta:
+            session.add(ProductoIngrediente(
+                producto_id=p.id,
+                ingrediente_id=insumos[n].id,
+                cantidad=Decimal(str(c)),
+                es_removible=(n in _REMOVIBLES),
+            ))
+
+    crear_producto(
+        "Hamburguesa Clásica", "Carne, cheddar, lechuga y tomate en pan artesanal.",
+        cats["Hamburguesas"], "https://placehold.co/600x400?text=Hamburguesa+Clasica",
+        [("Pan de hamburguesa", 1), ("Medallón de carne", 1), ("Queso cheddar", 1),
+         ("Lechuga", 20), ("Tomate", 30)],
+    )
+    crear_producto(
+        "Doble Cheese", "Doble medallón de carne y doble cheddar.",
+        cats["Hamburguesas"], "https://placehold.co/600x400?text=Doble+Cheese",
+        [("Pan de hamburguesa", 1), ("Medallón de carne", 2), ("Queso cheddar", 2)],
+    )
+    crear_producto(
+        "Pizza Muzzarella", "Mozzarella y salsa de tomate a la piedra.",
+        cats["Pizzas"], "https://placehold.co/600x400?text=Pizza+Muzzarella",
+        [("Masa de pizza", 1), ("Salsa de tomate", 150), ("Mozzarella", 250)],
+    )
+    crear_producto(
+        "Gaseosa en lata", "Bebida fría 354 ml.",
+        cats["Bebidas"], "https://placehold.co/600x400?text=Gaseosa",
+        [("Gaseosa lata 354ml", 1)],
+    )
+    crear_producto(
+        "Helado 1/4 kg", "Helado artesanal, sabores a elección.",
+        cats["Postres"], "https://placehold.co/600x400?text=Helado",
+        [("Helado (pote)", 250)],
+    )
+
+    session.commit()
+    print("Seed de catálogo demo completado (5 productos).")
 
 
 if __name__ == "__main__":

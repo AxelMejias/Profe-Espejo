@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,21 +38,6 @@ from app.modules.estadisticas.router import router as estadisticas_router
 limiter = Limiter(key_func=get_remote_address)
 
 
-async def _auto_cancelar_loop():
-    """Cancela pedidos ESPERANDO_PAGO sin pago confirmado cada 15 minutos."""
-    while True:
-        await asyncio.sleep(900)  # 15 min
-        try:
-            from app.core.unit_of_work import UnitOfWork
-            from app.modules.pedidos import service as pedidos_service
-            with UnitOfWork() as uow:
-                cancelados = pedidos_service.cancelar_pedidos_expirados(uow)
-            if cancelados:
-                print(f"[AUTO-CANCEL] {cancelados} pedido(s) cancelado(s) por timeout de pago.")
-        except Exception as e:
-            print(f"[AUTO-CANCEL] Error en ciclo de cancelación: {e}")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
@@ -62,13 +46,7 @@ async def lifespan(app: FastAPI):
         seed()
     except Exception as e:
         print(f"[SEED] Warning: {e}")
-    task = asyncio.create_task(_auto_cancelar_loop())
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
 
 
 app = FastAPI(
