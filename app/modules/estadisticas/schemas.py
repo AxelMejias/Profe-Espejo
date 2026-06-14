@@ -28,6 +28,12 @@ class IngresosPorFormaPagoItem(BaseModel):
     cantidad_pedidos: int
 
 
+class ResumenResponse(BaseModel):
+    ingreso_total: Decimal
+    pedidos_completados: int
+    ticket_promedio: Decimal
+
+
 class DashboardResponse(BaseModel):
     # Ingresos confirmados (solo pagos approved, EST-03)
     ingreso_total: Decimal

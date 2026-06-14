@@ -19,7 +19,7 @@ from app.modules.pedidos.model import Pedido, DetallePedido
 from app.modules.pagos.model import Pago
 from app.modules.estadisticas.schemas import (
     DashboardResponse, ProductoMasVendido, VentasPorPeriodo,
-    PedidosPorEstadoItem, IngresosPorFormaPagoItem,
+    PedidosPorEstadoItem, IngresosPorFormaPagoItem, ResumenResponse,
 )
 
 _ESTADO_CANCELADO = "CANCELADO"
@@ -72,6 +72,119 @@ def get_ingresos_por_forma_pago(
         )
         for r in rows
     ]
+
+
+def get_ventas_periodo(
+    session: Session, fecha_desde: date, fecha_hasta: date
+) -> List[VentasPorPeriodo]:
+    fecha_ar = sa.func.date(
+        sa.cast(Pedido.created_at, sa.DateTime(timezone=False))
+        + sa.text("INTERVAL '-3 hours'")
+    )
+    pedidos_aprobados = (
+        select(Pedido.id, Pedido.total, fecha_ar.label("fecha"))
+        .join(Pago, Pago.pedido_id == Pedido.id)
+        .where(
+            Pago.mp_status == "approved",
+            Pedido.estado_codigo != _ESTADO_CANCELADO,
+            Pedido.deleted_at.is_(None),
+            fecha_ar.between(fecha_desde, fecha_hasta),
+        )
+    ).subquery()
+    rows = session.exec(
+        select(
+            pedidos_aprobados.c.fecha,
+            func.count(pedidos_aprobados.c.id).label("pedidos"),
+            func.sum(pedidos_aprobados.c.total).label("ingreso"),
+        )
+        .group_by(pedidos_aprobados.c.fecha)
+        .order_by(pedidos_aprobados.c.fecha)
+    ).all()
+    return [
+        VentasPorPeriodo(
+            fecha=r.fecha,
+            pedidos=int(r.pedidos),
+            ingreso=Decimal(str(r.ingreso)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        )
+        for r in rows
+    ]
+
+
+def get_productos_top(
+    session: Session, fecha_desde: date, fecha_hasta: date, limit: int = 5
+) -> List[ProductoMasVendido]:
+    fecha_ar = sa.func.date(
+        sa.cast(Pedido.created_at, sa.DateTime(timezone=False))
+        + sa.text("INTERVAL '-3 hours'")
+    )
+    pedidos_aprobados = (
+        select(Pedido.id)
+        .join(Pago, Pago.pedido_id == Pedido.id)
+        .where(
+            Pago.mp_status == "approved",
+            Pedido.estado_codigo != _ESTADO_CANCELADO,
+            Pedido.deleted_at.is_(None),
+            fecha_ar.between(fecha_desde, fecha_hasta),
+        )
+    ).subquery()
+    rows = session.exec(
+        select(
+            DetallePedido.producto_id,
+            DetallePedido.nombre_snapshot,
+            func.sum(DetallePedido.cantidad).label("cantidad_total"),
+            func.sum(DetallePedido.subtotal_snap).label("ingreso_total"),
+        )
+        .where(DetallePedido.pedido_id.in_(select(pedidos_aprobados.c.id)))
+        .group_by(DetallePedido.producto_id, DetallePedido.nombre_snapshot)
+        .order_by(sa.desc("cantidad_total"))
+        .limit(limit)
+    ).all()
+    return [
+        ProductoMasVendido(
+            producto_id=r.producto_id,
+            nombre=r.nombre_snapshot,
+            cantidad_total=int(r.cantidad_total),
+            ingreso_total=Decimal(str(r.ingreso_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        )
+        for r in rows
+    ]
+
+
+def get_resumen_kpis(
+    session: Session, fecha_desde: date, fecha_hasta: date
+) -> ResumenResponse:
+    fecha_ar = sa.func.date(
+        sa.cast(Pedido.created_at, sa.DateTime(timezone=False))
+        + sa.text("INTERVAL '-3 hours'")
+    )
+    pedidos_aprobados = (
+        select(Pedido.id, Pedido.total)
+        .join(Pago, Pago.pedido_id == Pedido.id)
+        .where(
+            Pago.mp_status == "approved",
+            Pedido.estado_codigo != _ESTADO_CANCELADO,
+            Pedido.deleted_at.is_(None),
+            fecha_ar.between(fecha_desde, fecha_hasta),
+        )
+    ).subquery()
+    resumen = session.exec(
+        select(
+            func.coalesce(func.sum(pedidos_aprobados.c.total), Decimal("0")).label("ingreso"),
+            func.count(pedidos_aprobados.c.id).label("pedidos"),
+        )
+    ).one()
+    ingreso_total = Decimal(str(resumen.ingreso)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    pedidos_completados = int(resumen.pedidos)
+    ticket_promedio = (
+        (ingreso_total / pedidos_completados).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if pedidos_completados > 0
+        else Decimal("0.00")
+    )
+    return ResumenResponse(
+        ingreso_total=ingreso_total,
+        pedidos_completados=pedidos_completados,
+        ticket_promedio=ticket_promedio,
+    )
 
 
 def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> DashboardResponse:

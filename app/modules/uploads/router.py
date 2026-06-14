@@ -1,12 +1,12 @@
 """
 Módulo /uploads — gestión de imágenes en Cloudinary.
 
-POST /api/v1/uploads        → sube una imagen, devuelve secure_url + public_id
-DELETE /api/v1/uploads      → elimina una imagen por public_id
+POST /api/v1/uploads/imagen              → sube una imagen, devuelve secure_url + public_id
+DELETE /api/v1/uploads/imagen/{public_id} → elimina una imagen por public_id
 
 Solo accesible por ADMIN.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
 from pydantic import BaseModel
 
 import cloudinary
@@ -40,7 +40,7 @@ class UploadResponse(BaseModel):
     public_id: str
 
 
-@router.post("/", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, summary="Subir imagen a Cloudinary")
+@router.post("/imagen", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, summary="Subir imagen a Cloudinary")
 def upload_image(
     archivo: UploadFile = File(...),
     folder: str = Query(default="foodstore/productos", description="Carpeta destino en Cloudinary"),
@@ -69,9 +69,9 @@ def upload_image(
         )
 
 
-@router.delete("/", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar imagen de Cloudinary por public_id")
+@router.delete("/imagen/{public_id:path}", status_code=status.HTTP_204_NO_CONTENT, summary="Eliminar imagen de Cloudinary por public_id")
 def delete_image(
-    public_id: str = Query(..., description="public_id de la imagen en Cloudinary"),
+    public_id: str = Path(..., description="public_id de la imagen en Cloudinary"),
     _=_ADMIN,
 ):
     _configure_cloudinary()
