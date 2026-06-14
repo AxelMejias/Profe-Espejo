@@ -15,6 +15,8 @@ from app.modules.pedidos.model import Pedido, DetallePedido
 from app.modules.pagos.model import Pago
 
 _ESTADO_CANCELADO = "CANCELADO"
+_ESTADO_ENTREGADO = "ENTREGADO"
+_FORMA_PAGO_MP = "MERCADOPAGO"
 _ESTADOS_ACTIVOS = ("PENDIENTE", "CONFIRMADO", "EN_PREP")
 _AGRUPACIONES = {"day", "week", "month"}
 
@@ -34,13 +36,32 @@ class EstadisticasRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    # ── Filtro base: pedidos con pago aprobado, no cancelados, no borrados ──────
-    def _filtros_ingreso(self):
-        return [
-            Pago.mp_status == "approved",                 # EST-03
-            Pedido.estado_codigo != _ESTADO_CANCELADO,    # EST-01
+    # ── Condición de "ingreso": pedido efectivamente cobrado, no cancelado ──────
+    def _cond_ingreso(self):
+        """Un pedido suma como ingreso si no está cancelado/borrado y está
+        efectivamente cobrado:
+          • MERCADOPAGO → existe un Pago con mp_status='approved' (EST-03).
+          • EFECTIVO / TRANSFERENCIA → el pedido llegó a ENTREGADO (cobro en mano).
+        Se usa EXISTS correlacionado en vez de JOIN para no excluir los pedidos
+        sin fila Pago (efectivo/transferencia) ni duplicar totales por múltiples
+        filas de Pago.
+        """
+        pago_aprobado = (
+            select(Pago.id)
+            .where(Pago.pedido_id == Pedido.id, Pago.mp_status == "approved")
+            .exists()
+        )
+        return sa.and_(
             Pedido.deleted_at.is_(None),
-        ]
+            Pedido.estado_codigo != _ESTADO_CANCELADO,    # EST-01
+            sa.or_(
+                sa.and_(Pedido.forma_pago_codigo == _FORMA_PAGO_MP, pago_aprobado),
+                sa.and_(
+                    Pedido.forma_pago_codigo != _FORMA_PAGO_MP,
+                    Pedido.estado_codigo == _ESTADO_ENTREGADO,
+                ),
+            ),
+        )
 
     # ── Ventas por período (LineChart) ─────────────────────────────────────────
     def get_ventas_periodo(self, desde: date, hasta: date, agrupacion: str = "day"):
@@ -53,8 +74,7 @@ class EstadisticasRepository:
                 func.coalesce(func.sum(Pedido.total), 0).label("total_ventas"),
                 func.count(func.distinct(Pedido.id)).label("cantidad_pedidos"),
             )
-            .join(Pago, Pago.pedido_id == Pedido.id)
-            .where(*self._filtros_ingreso(), _ar_date().between(desde, hasta))  # EST-05
+            .where(self._cond_ingreso(), _ar_date().between(desde, hasta))  # EST-05
             .group_by(periodo)
             .order_by(periodo)
         ).all()
@@ -69,8 +89,7 @@ class EstadisticasRepository:
                 func.sum(DetallePedido.subtotal_snap).label("ingresos"),
             )
             .join(Pedido, Pedido.id == DetallePedido.pedido_id)
-            .join(Pago, Pago.pedido_id == Pedido.id)
-            .where(*self._filtros_ingreso(), _ar_date().between(desde, hasta))
+            .where(self._cond_ingreso(), _ar_date().between(desde, hasta))
             .group_by(DetallePedido.producto_id, DetallePedido.nombre_snapshot)
             .order_by(sa.desc("cantidad_vendida"))
             .limit(limit)
@@ -96,8 +115,7 @@ class EstadisticasRepository:
                 func.coalesce(func.sum(Pedido.total), 0).label("total"),
                 func.count(func.distinct(Pedido.id)).label("cantidad"),
             )
-            .join(Pago, Pago.pedido_id == Pedido.id)
-            .where(*self._filtros_ingreso(), _ar_date().between(desde, hasta))
+            .where(self._cond_ingreso(), _ar_date().between(desde, hasta))
             .group_by(Pedido.forma_pago_codigo)
             .order_by(sa.desc("total"))
         ).all()
@@ -110,8 +128,7 @@ class EstadisticasRepository:
                 func.coalesce(func.sum(Pedido.total), 0),
                 func.count(func.distinct(Pedido.id)),
             )
-            .join(Pago, Pago.pedido_id == Pedido.id)
-            .where(*self._filtros_ingreso(), _ar_date().between(desde, hasta))
+            .where(self._cond_ingreso(), _ar_date().between(desde, hasta))
         ).one()
 
     def get_pedidos_activos(self) -> int:
