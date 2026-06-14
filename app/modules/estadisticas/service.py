@@ -10,6 +10,7 @@ Reglas según la Especificación Técnica v6.0:
 """
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+from typing import List
 
 import sqlalchemy as sa
 from sqlmodel import Session, select, func
@@ -18,9 +19,59 @@ from app.modules.pedidos.model import Pedido, DetallePedido
 from app.modules.pagos.model import Pago
 from app.modules.estadisticas.schemas import (
     DashboardResponse, ProductoMasVendido, VentasPorPeriodo,
+    PedidosPorEstadoItem, IngresosPorFormaPagoItem,
 )
 
 _ESTADO_CANCELADO = "CANCELADO"
+
+
+def get_pedidos_por_estado(session: Session) -> List[PedidosPorEstadoItem]:
+    rows = session.exec(
+        select(
+            Pedido.estado_codigo,
+            func.count(Pedido.id).label("cantidad"),
+        )
+        .where(Pedido.deleted_at.is_(None))
+        .group_by(Pedido.estado_codigo)
+        .order_by(Pedido.estado_codigo)
+    ).all()
+    return [
+        PedidosPorEstadoItem(estado_codigo=r.estado_codigo, cantidad=int(r.cantidad))
+        for r in rows
+    ]
+
+
+def get_ingresos_por_forma_pago(
+    session: Session, fecha_desde: date, fecha_hasta: date
+) -> List[IngresosPorFormaPagoItem]:
+    fecha_ar = sa.func.date(
+        sa.cast(Pedido.created_at, sa.DateTime(timezone=False))
+        + sa.text("INTERVAL '-3 hours'")
+    )
+    rows = session.exec(
+        select(
+            Pedido.forma_pago_codigo.label("forma_pago"),
+            func.coalesce(func.sum(Pedido.total), Decimal("0")).label("total"),
+            func.count(Pedido.id).label("cantidad_pedidos"),
+        )
+        .join(Pago, Pago.pedido_id == Pedido.id)
+        .where(
+            Pago.mp_status == "approved",
+            Pedido.estado_codigo != _ESTADO_CANCELADO,
+            Pedido.deleted_at.is_(None),
+            fecha_ar.between(fecha_desde, fecha_hasta),
+        )
+        .group_by(Pedido.forma_pago_codigo)
+        .order_by(sa.desc("total"))
+    ).all()
+    return [
+        IngresosPorFormaPagoItem(
+            forma_pago=r.forma_pago,
+            total=Decimal(str(r.total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            cantidad_pedidos=int(r.cantidad_pedidos),
+        )
+        for r in rows
+    ]
 
 
 def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> DashboardResponse:
@@ -105,10 +156,15 @@ def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> Das
         for r in dias_rows
     ]
 
+    pedidos_por_estado = get_pedidos_por_estado(session)
+    ingresos_por_forma_pago = get_ingresos_por_forma_pago(session, fecha_desde, fecha_hasta)
+
     return DashboardResponse(
         ingreso_total=ingreso_total,
         pedidos_completados=pedidos_completados,
         ticket_promedio=ticket_promedio,
         productos_mas_vendidos=productos_mas_vendidos,
         ventas_por_dia=ventas_por_dia,
+        pedidos_por_estado=pedidos_por_estado,
+        ingresos_por_forma_pago=ingresos_por_forma_pago,
     )

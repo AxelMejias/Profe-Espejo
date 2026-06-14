@@ -17,6 +17,17 @@ class VentasPorPeriodo(BaseModel):
     ingreso: Decimal
 
 
+class PedidosPorEstadoItem(BaseModel):
+    estado_codigo: str
+    cantidad: int
+
+
+class IngresosPorFormaPagoItem(BaseModel):
+    forma_pago: str
+    total: Decimal
+    cantidad_pedidos: int
+
+
 class DashboardResponse(BaseModel):
     # Ingresos confirmados (solo pagos approved, EST-03)
     ingreso_total: Decimal
@@ -28,3 +39,5 @@ class DashboardResponse(BaseModel):
     productos_mas_vendidos: List[ProductoMasVendido]
     # Ventas por día en el período
     ventas_por_dia: List[VentasPorPeriodo]
+    pedidos_por_estado: List[PedidosPorEstadoItem] = []
+    ingresos_por_forma_pago: List[IngresosPorFormaPagoItem] = []
