@@ -3,6 +3,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Query, Path, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
 from jose import JWTError
+from jose.exceptions import ExpiredSignatureError
 
 from app.modules.pedidos.schemas import (
     PedidoCreate, PedidoResponse, PaginatedPedidos,
@@ -252,12 +253,16 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008, reason="Token requerido")
         return
 
-    # 2. Validar JWT
+    # 2. Validar JWT — 4001 expirado (cliente puede refrescar), 1008 inválido
     try:
         payload = decode_access_token(token)
+    except ExpiredSignatureError:
+        await websocket.accept()
+        await websocket.close(code=4001, reason="Token expirado")
+        return
     except JWTError:
         await websocket.accept()
-        await websocket.close(code=1008, reason="Token inválido o expirado")
+        await websocket.close(code=1008, reason="Token inválido")
         return
 
     user_id_str = payload.get("sub")

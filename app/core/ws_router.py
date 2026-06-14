@@ -10,6 +10,7 @@ Canales: role:{rol} (automático) y order:{id} (suscripción manual).
 import json
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
+from jose.exceptions import ExpiredSignatureError
 
 from app.core.security import decode_access_token
 from app.core.websocket import manager
@@ -26,11 +27,17 @@ async def ws_pedidos(
     token: str = Query(..., description="JWT access token"),
 ):
     # 1. Validar JWT del query param
+    # 4001 = token expirado (el cliente puede refrescar y reintentar)
+    # 1008 = token malformado o inválido (no reintentar)
     try:
         payload = decode_access_token(token)
+    except ExpiredSignatureError:
+        await websocket.accept()
+        await websocket.close(code=4001, reason="Token expirado")
+        return
     except JWTError:
         await websocket.accept()
-        await websocket.close(code=1008, reason="Token inválido o expirado")
+        await websocket.close(code=1008, reason="Token inválido")
         return
 
     user_id_str = payload.get("sub")
