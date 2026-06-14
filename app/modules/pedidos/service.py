@@ -3,7 +3,7 @@ Service de Pedidos.
 Regla: NO crea su propio UoW. Recibe `uow` del router.
 """
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Set
 from fastapi import HTTPException, status
@@ -476,41 +476,51 @@ def cancelar_pedido_cliente(
 # WebSocket — emisión de eventos en tiempo real
 # ──────────────────────────────────────────────────────────────────────────────
 
-_EVENTOS_WS: dict[str, str] = {
-    "PENDIENTE":  "NUEVO_PEDIDO",
-    "CONFIRMADO": "PEDIDO_CONFIRMADO",
-    "EN_PREP":    "PEDIDO_EN_PREPARACION",
-    "ENTREGADO":  "PEDIDO_ENTREGADO",
-    "CANCELADO":  "PEDIDO_CANCELADO",
-}
-
-# Roles de staff notificados en cada transición
-_ROLES_POR_ESTADO: dict[str, list[str]] = {
-    "PENDIENTE":  ["pedidos", "admin"],
-    "CONFIRMADO": ["pedidos", "admin"],
-    "EN_PREP":    ["pedidos", "admin"],
-    "ENTREGADO":  ["pedidos", "admin"],
-    "CANCELADO":  ["pedidos", "admin"],
-}
+# Roles de staff notificados en cada transición (rooms de rol del canal admin)
+_ROLES_STAFF_WS = ["pedidos", "admin"]
 
 
-async def emit_ws_evento(pedido_id: int, estado: str, data: dict) -> None:
+def _tipo_evento(estado_nuevo: str) -> str:
+    """Mapea el estado destino al tipo de evento §9.4."""
+    if estado_nuevo == _ESTADO_CANCELADO:
+        return "pedido_cancelado"
+    return "estado_cambiado"
+
+
+async def emit_ws_evento(pedido_id: int, event: Optional[str] = None) -> None:
     """
-    Emite un evento WS a la room del pedido y a las rooms de rol del staff.
-    Se llama desde el router DESPUÉS de que el UoW commitea el cambio.
+    Emite un evento WS con el formato §9.4 a la room del pedido y a las rooms de
+    rol del staff. Se llama desde el router DESPUÉS de que el UoW commitea.
+
+    Lee la última fila de HistorialEstadoPedido (append-only, fuente de verdad de
+    la transición) para construir estado_anterior/nuevo, usuario_id y motivo.
+    Si `event` se pasa explícito (p. ej. 'pago_confirmado') tiene prioridad.
     No lanza excepciones — si no hay conexiones activas, es silencioso.
     """
     from app.core.websocket import manager
+    from app.core.unit_of_work import UnitOfWork
 
-    event_type = _EVENTOS_WS.get(estado)
-    if not event_type:
-        return
+    # Construir el payload DENTRO del contexto: al cerrar el UoW la sesión se
+    # cierra y los objetos quedan detached (no se pueden leer sus atributos).
+    with UnitOfWork() as uow:
+        historial = uow.pedidos.get_historial(pedido_id)
+        if not historial:
+            return
+        ultimo = historial[-1]
+        estado_nuevo = ultimo.estado_hacia
+        ts = ultimo.created_at or datetime.utcnow()
+        payload = {
+            "event": event or _tipo_evento(estado_nuevo),
+            "pedido_id": pedido_id,
+            "estado_anterior": ultimo.estado_desde,
+            "estado_nuevo": estado_nuevo,
+            "usuario_id": ultimo.usuario_id,
+            "motivo": ultimo.motivo,
+            "timestamp": ts.replace(tzinfo=timezone.utc).isoformat(),
+        }
 
-    await manager.broadcast_to_order(pedido_id, event_type, data)
-
-    roles = _ROLES_POR_ESTADO.get(estado, [])
-    if roles:
-        await manager.broadcast_to_roles(roles, event_type, data)
+    await manager.broadcast_to_order(pedido_id, payload)
+    await manager.broadcast_to_roles(_ROLES_STAFF_WS, payload)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
