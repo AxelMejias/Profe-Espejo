@@ -10,12 +10,13 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/categorias", tags=["Categorías"])
 
-_LEER  = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+# Lecturas del catálogo de categorías: PÚBLICAS (coherente con el catálogo de
+# productos público, doc §5.2). Las escrituras siguen siendo solo ADMIN.
 _ADMIN = Depends(require_role(["ADMIN"]))
 
 
 @router.get("/tree", response_model=list[CategoriaTree], summary="Árbol recursivo de categorías")
-def obtener_arbol(_=_LEER):
+def obtener_arbol():
     with UnitOfWork() as uow:
         return service.get_tree(uow)
 
@@ -25,20 +26,19 @@ def listar_categorias(
     nombre: Annotated[Optional[str], Query(max_length=100)] = None,
     page:   Annotated[int, Query(ge=1)] = 1,
     size:   Annotated[int, Query(ge=1, le=100)] = 20,
-    _=_LEER,
 ):
     with UnitOfWork() as uow:
         return service.get_all(uow, nombre=nombre, page=page, size=size)
 
 
 @router.get("/{categoria_id}", response_model=CategoriaRead, summary="Obtener categoría por ID")
-def obtener_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_LEER):
+def obtener_categoria(categoria_id: Annotated[int, Path(ge=1)]):
     with UnitOfWork() as uow:
         return service.get_by_id(uow, categoria_id)
 
 
 @router.get("/{categoria_id}/subcategorias", response_model=list[CategoriaRead])
-def listar_subcategorias(categoria_id: Annotated[int, Path(ge=1)], _=_LEER):
+def listar_subcategorias(categoria_id: Annotated[int, Path(ge=1)]):
     with UnitOfWork() as uow:
         return service.get_subcategorias(uow, categoria_id)
 

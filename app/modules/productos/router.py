@@ -16,7 +16,8 @@ from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 
-_PUBLICO        = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
+# Catálogo de lectura: PÚBLICO según doc §5.2 (GET /productos y /productos/{id}
+# son navegables sin autenticación).
 _DISPONIBILIDAD = Depends(require_role(["ADMIN", "STOCK"]))   # toggle disponibilidad
 _ADMIN          = Depends(require_role(["ADMIN"]))             # crear, editar, borrar, importar, reactivar
 
@@ -202,7 +203,6 @@ def listar_productos(
     solo_destacados:  Annotated[bool, Query()]                          = False,
     page:             Annotated[int, Query(ge=1)]                       = 1,
     size:             Annotated[int, Query(ge=1, le=100)]               = 20,
-    _=_PUBLICO,
 ):
     with UnitOfWork() as uow:
         return service.get_all(
@@ -228,7 +228,7 @@ def listar_productos_inactivos(
 
 
 @router.get("/{producto_id}", response_model=ProductoRead, summary="Obtener producto por ID")
-def obtener_producto(producto_id: Annotated[int, Path(ge=1)], _=_PUBLICO):
+def obtener_producto(producto_id: Annotated[int, Path(ge=1)]):
     with UnitOfWork() as uow:
         return service.get_by_id(uow, producto_id)
 
