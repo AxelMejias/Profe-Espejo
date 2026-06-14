@@ -212,3 +212,51 @@ async def cancelar_pedido(
         )
     await service.emit_ws_evento(result.id)
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rutas semánticas REST (doc §5.3) — alias de las de arriba con el verbo/path
+# que pide la consigna. Reutilizan el mismo service; las POST quedan por
+# compatibilidad con el frontend actual.
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.patch("/{pedido_id}/estado", response_model=PedidoResponse,
+              summary="Avanzar estado del pedido — ruta semántica REST (ADMIN / PEDIDOS)")
+async def avanzar_estado_patch(
+    pedido_id: Annotated[int, Path(ge=1)],
+    data: AvanzarEstadoRequest,
+    payload: dict = Depends(get_current_user_payload),
+    _=_STAFF,
+):
+    with UnitOfWork() as uow:
+        result = service.avanzar_estado(
+            uow,
+            pedido_id=pedido_id,
+            estado_hacia=data.estado_hacia,
+            motivo=data.motivo,
+            actor_user_id=int(payload["sub"]),
+            actor_roles=payload.get("roles", []),
+            restaurar_stock=data.restaurar_stock,
+        )
+    await service.emit_ws_evento(result.id)
+    return result
+
+
+@router.delete("/{pedido_id}", response_model=PedidoResponse,
+               summary="Cancelar pedido propio — ruta semántica REST (CLIENT)")
+async def cancelar_pedido_delete(
+    pedido_id: Annotated[int, Path(ge=1)],
+    data: Optional[CancelarPedidoRequest] = None,
+    usuario_id: int = Depends(get_current_user_id),
+    _=_CLIENT,
+):
+    motivo = data.motivo if data else "Cancelado por el cliente"
+    restaurar_stock = data.restaurar_stock if data else True
+    with UnitOfWork() as uow:
+        result = service.cancelar_pedido_cliente(
+            uow, pedido_id, motivo,
+            cliente_user_id=usuario_id,
+            restaurar_stock=restaurar_stock,
+        )
+    await service.emit_ws_evento(result.id)
+    return result

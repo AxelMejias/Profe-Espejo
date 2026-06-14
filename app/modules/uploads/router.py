@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/v1/uploads", tags=["Uploads"])
 _ADMIN = Depends(require_role(["ADMIN"]))
 
 _ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_MAX_BYTES = 5 * 1024 * 1024  # 5 MB (doc §10.1 paso 3)
 
 
 def _configure_cloudinary():
@@ -35,12 +36,21 @@ def _configure_cloudinary():
     )
 
 
-class UploadResponse(BaseModel):
+class CloudinaryResponse(BaseModel):
+    """Respuesta del upload (doc §6.3). secure_url se guarda en imagenes_url[]."""
     secure_url: str
     public_id: str
+    width: int
+    height: int
+    format: str
+    resource_type: str
 
 
-@router.post("/imagen", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, summary="Subir imagen a Cloudinary")
+# Alias retrocompatible — el nombre canónico de la doc es CloudinaryResponse.
+UploadResponse = CloudinaryResponse
+
+
+@router.post("/imagen", response_model=CloudinaryResponse, status_code=status.HTTP_201_CREATED, summary="Subir imagen a Cloudinary")
 def upload_image(
     archivo: UploadFile = File(...),
     folder: str = Query(default="foodstore/productos", description="Carpeta destino en Cloudinary"),
@@ -54,12 +64,29 @@ def upload_image(
         )
     try:
         contents = archivo.file.read()
+        # Validar tamaño ≤ 5 MB (doc §10.1 paso 3)
+        if len(contents) > _MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"detail": "La imagen supera el máximo de 5 MB", "code": "FILE_TOO_LARGE"},
+            )
         result = cloudinary.uploader.upload(
             contents,
             folder=folder,
+            allowed_formats=["jpg", "jpeg", "png", "webp"],
+            overwrite=False,
+            unique_filename=True,
+            resource_type="image",
             transformation=[{"width": 800, "height": 800, "crop": "limit", "quality": "auto"}],
         )
-        return UploadResponse(secure_url=result["secure_url"], public_id=result["public_id"])
+        return CloudinaryResponse(
+            secure_url=result["secure_url"],
+            public_id=result["public_id"],
+            width=result["width"],
+            height=result["height"],
+            format=result["format"],
+            resource_type=result["resource_type"],
+        )
     except HTTPException:
         raise
     except Exception as e:

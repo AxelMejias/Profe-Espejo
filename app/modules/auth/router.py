@@ -43,7 +43,8 @@ def _clear_auth_cookie(response: Response) -> None:
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(data: RegisterRequest):
+@limiter.limit("5/15minutes")
+def register(request: Request, data: RegisterRequest):
     with UnitOfWork() as uow:
         return auth_service.register(uow, data)
 
