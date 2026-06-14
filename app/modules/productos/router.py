@@ -2,17 +2,14 @@ from io import BytesIO
 from typing import Annotated, Optional
 import math
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query, Path, Body, UploadFile, File, status, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, Body, UploadFile, File, status, HTTPException  # noqa: F401
 from fastapi.responses import StreamingResponse
-import cloudinary
-import cloudinary.uploader
 import openpyxl
 
 from app.modules.productos.schemas import (
     ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos,
 )
 from app.modules.productos import service
-from app.core.config import settings
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
 
@@ -193,38 +190,6 @@ def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
 
     return {"creados": creados, "omitidos": omitidos, "errores": errores}
 
-
-@router.post("/upload-image", summary="Subir imagen de producto a Cloudinary")
-def upload_image(archivo: UploadFile = File(...), _=_ADMIN):
-    if not settings.CLOUDINARY_CLOUD_NAME:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"detail": "Cloudinary no configurado. Agregá las credenciales al .env", "code": "CLOUDINARY_NOT_CONFIGURED"},
-        )
-    cloudinary.config(
-        cloud_name=settings.CLOUDINARY_CLOUD_NAME,
-        api_key=settings.CLOUDINARY_API_KEY,
-        api_secret=settings.CLOUDINARY_API_SECRET,
-    )
-    allowed = {"image/jpeg", "image/png", "image/webp", "image/gif"}
-    if archivo.content_type not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"detail": "Solo se permiten imágenes (jpg, png, webp, gif)", "code": "INVALID_FILE_TYPE"},
-        )
-    try:
-        contents = archivo.file.read()
-        result = cloudinary.uploader.upload(
-            contents,
-            folder="foodstore/productos",
-            transformation=[{"width": 800, "height": 800, "crop": "limit", "quality": "auto"}],
-        )
-        return {"image_url": result["secure_url"]}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"detail": f"Error al subir imagen a Cloudinary: {str(e)}", "code": "CLOUDINARY_UPLOAD_ERROR"},
-        )
 
 
 @router.get("/", response_model=PaginatedProductos, summary="Listar productos")

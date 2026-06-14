@@ -20,3 +20,8 @@ class PagoRepository(BaseRepository[Pago]):
         return self.session.exec(
             select(Pago).where(Pago.mp_payment_id == mp_payment_id)
         ).first()
+
+    def get_by_pedido_id(self, pedido_id: int) -> Optional[Pago]:
+        return self.session.exec(
+            select(Pago).where(Pago.pedido_id == pedido_id)
+        ).first()

@@ -3,7 +3,9 @@ Tablas pivot N:N compartidas entre módulos.
 Se centralizan aquí para evitar imports circulares.
 """
 from typing import Optional
-from sqlmodel import SQLModel, Field
+from decimal import Decimal
+from sqlmodel import SQLModel, Field, Column
+import sqlalchemy as sa
 
 
 class ProductoCategoria(SQLModel, table=True):
@@ -15,6 +17,7 @@ class ProductoCategoria(SQLModel, table=True):
     categoria_id: Optional[int] = Field(
         default=None, foreign_key="categoria.id", primary_key=True
     )
+    es_principal: bool = Field(default=False, description="Categoría principal del producto")
 
 
 class ProductoIngrediente(SQLModel, table=True):
@@ -26,5 +29,11 @@ class ProductoIngrediente(SQLModel, table=True):
     ingrediente_id: Optional[int] = Field(
         default=None, foreign_key="ingrediente.id", primary_key=True
     )
-    cantidad: float = Field(gt=0, description="Cantidad del ingrediente en el producto")
-    es_removible: bool = Field(default=True, description="Si el cliente puede excluirlo")
+    cantidad: Decimal = Field(
+        sa_column=Column(sa.Numeric(10, 3), nullable=False),
+        description="Cantidad del ingrediente en el producto",
+    )
+    es_removible: bool = Field(default=False, description="Si el cliente puede excluirlo")
+    unidad_medida_id: Optional[int] = Field(
+        default=None, foreign_key="unidad_medida.id", description="Unidad de medida de la cantidad"
+    )

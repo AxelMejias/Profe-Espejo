@@ -26,6 +26,14 @@ from app.modules.pagos.model import Pago
 _FORMA_PAGO_MP = "MERCADOPAGO"
 
 
+def get_pago_by_pedido(uow, pedido_id: int):
+    """Retorna el pago asociado al pedido o lanza 404."""
+    pago = uow.pagos.get_by_pedido_id(pedido_id)
+    if not pago:
+        _problem("PAGO_NOT_FOUND", f"No existe un pago para el pedido {pedido_id}", status.HTTP_404_NOT_FOUND)
+    return pago
+
+
 def _problem(code: str, detail: str, http_status: int):
     raise HTTPException(
         status_code=http_status,
@@ -72,14 +80,14 @@ def crear_preferencia_y_pago(uow, pedido, detalles: list) -> str:
     else:
         notification_url = settings.MP_NOTIFICATION_URL or None
 
-    # back_urls = redirect del BROWSER → SIEMPRE al frontend, nunca al backend/ngrok
-    # (ngrok-free muestra una página de advertencia al navegador). La confirmación
-    # del pago la hace el webhook, no este redirect.
-    fe = settings.FRONTEND_URL
+    # back_urls = redirect del BROWSER → apuntan al backend ngrok (HTTPS válida
+    # para MP). El endpoint /redirect/{id}/{status} hace un 302 al frontend.
+    # Si ngrok no está corriendo, caen directo al frontend (sin auto_return).
+    be = ngrok_url or settings.BACKEND_URL or "http://localhost:8000"
     back_urls = {
-        "success": f"{fe}/pedido-exitoso?collection_status=approved&external_reference={pedido.id}",
-        "failure": f"{fe}/pedido-exitoso?collection_status=failure&external_reference={pedido.id}",
-        "pending": f"{fe}/pedido-exitoso?collection_status=pending&external_reference={pedido.id}",
+        "success": f"{be}/api/v1/pagos/redirect/{pedido.id}/success",
+        "failure": f"{be}/api/v1/pagos/redirect/{pedido.id}/failure",
+        "pending": f"{be}/api/v1/pagos/redirect/{pedido.id}/pending",
     }
 
     items = [
@@ -110,8 +118,8 @@ def crear_preferencia_y_pago(uow, pedido, detalles: list) -> str:
         "back_urls": back_urls,
         "external_reference": str(pedido.id),
         "statement_descriptor": "Food Store",
-        # auto_return solo con frontend https — MP rechaza la preferencia si es localhost
-        **({"auto_return": "approved"} if fe.startswith("https") else {}),
+        # auto_return requiere back_urls HTTPS — ngrok lo provee
+        **({"auto_return": "approved"} if ngrok_url else {}),
         **({"notification_url": notification_url} if notification_url else {}),
     }
 
@@ -202,11 +210,12 @@ def procesar_webhook(
     - Solo procesa topic == "payment".
     - Consulta el pago real en MP, actualiza el Pago e (idempotente) avanza el Pedido.
     """
-    if not validar_firma_webhook(x_signature, x_request_id, data_id):
-        _problem("INVALID_SIGNATURE", "Firma del webhook inválida", status.HTTP_401_UNAUTHORIZED)
-
+    # MP no firma merchant_order igual que payment → ignorar sin validar firma
     if topic != "payment":
         return {"action": "ignored", "pedido_id": None}
+
+    if not validar_firma_webhook(x_signature, x_request_id, data_id):
+        _problem("INVALID_SIGNATURE", "Firma del webhook inválida", status.HTTP_401_UNAUTHORIZED)
 
     import mercadopago
     sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)

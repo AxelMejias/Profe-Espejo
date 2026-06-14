@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 # ── Sub-schemas para el maestro-detalle ───────────────────────────────────────
@@ -31,7 +31,7 @@ class InsumoEnProductoRead(BaseModel):
 class ProductoCreate(BaseModel):
     nombre: str = Field(min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
-    image_url: Optional[str] = Field(default=None, max_length=500)
+    imagenes_url: List[str] = Field(default_factory=list)
     margen_ganancia: Decimal = Field(ge=Decimal("0"), le=Decimal("10"))
     disponible: bool = True
     unidad_venta_id: Optional[int] = Field(default=None, gt=0)
@@ -42,7 +42,7 @@ class ProductoCreate(BaseModel):
 class ProductoUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=500)
-    image_url: Optional[str] = Field(default=None, max_length=500)
+    imagenes_url: Optional[List[str]] = None
     margen_ganancia: Optional[Decimal] = Field(default=None, ge=0, le=10)
     disponible: Optional[bool] = None
     unidad_venta_id: Optional[int] = Field(default=None, gt=0)
@@ -62,10 +62,10 @@ class ProductoRead(BaseModel):
     id: int
     nombre: str
     descripcion: Optional[str]
-    image_url: Optional[str] = None
-    precio: Decimal                    # calculado: costo_total * (1 + margen)
+    imagenes_url: List[str] = Field(default_factory=list)
+    precio: Decimal
     margen_ganancia: Decimal
-    costo_total_insumos: Decimal       # suma de subtotales
+    costo_total_insumos: Decimal
     disponible: bool
     destacado: bool = False
     unidad_venta_id: Optional[int] = None
@@ -76,6 +76,11 @@ class ProductoRead(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def image_url(self) -> Optional[str]:
+        return self.imagenes_url[0] if self.imagenes_url else None
 
 
 class PaginatedProductos(BaseModel):

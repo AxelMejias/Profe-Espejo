@@ -32,7 +32,9 @@ from app.modules.direcciones.router  import router as direcciones_router
 from app.modules.pedidos.router      import router as pedidos_router
 from app.modules.pagos.router        import router as pagos_router
 from app.modules.unidades.router     import router as unidades_router
-from app.modules.admin.router        import router as admin_router   # ← NUEVO
+from app.modules.admin.router        import router as admin_router
+from app.modules.uploads.router      import router as uploads_router
+from app.modules.estadisticas.router import router as estadisticas_router
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -106,6 +108,8 @@ app.include_router(pedidos_router)
 app.include_router(pagos_router)
 app.include_router(unidades_router)
 app.include_router(admin_router)
+app.include_router(uploads_router)
+app.include_router(estadisticas_router)
 
 
 @app.get("/", tags=["Root"])

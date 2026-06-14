@@ -538,6 +538,8 @@ def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
         _problem("PEDIDO_NOT_FOUND", f"Pedido {pedido_id} no encontrado", status.HTTP_404_NOT_FOUND)
 
     if pedido.estado_codigo != _ESTADO_ESPERANDO_PAGO:
+        # Si ya pasó, al menos aseguramos que el Pago quede como approved
+        _marcar_pago_approved(uow, pedido_id)
         return _build_response(uow, pedido)
 
     estado_desde         = pedido.estado_codigo
@@ -552,7 +554,19 @@ def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
         usuario_id=None,
         motivo="Pago confirmado por MercadoPago",
     ))
+
+    _marcar_pago_approved(uow, pedido_id)
     return _build_response(uow, pedido)
+
+
+def _marcar_pago_approved(uow, pedido_id: int) -> None:
+    """Actualiza Pago.mp_status a 'approved' si existe y no lo está ya."""
+    from datetime import datetime as _dt
+    pago = uow.pagos.get_by_pedido_id(pedido_id)
+    if pago and pago.mp_status != "approved":
+        pago.mp_status = "approved"
+        pago.updated_at = _dt.utcnow()
+        uow.pagos.add(pago)
 
 
 def cancelar_pedidos_expirados(uow, minutos: int = 30) -> int:

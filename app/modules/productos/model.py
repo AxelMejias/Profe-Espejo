@@ -27,7 +27,10 @@ class Producto(SQLModel, table=True):
         sa_column=Column(sa.Numeric(5, 4), nullable=False, server_default="0.3"),
     )
 
-    image_url: Optional[str] = Field(default=None, max_length=500)
+    imagenes_url: List[str] = Field(
+        default_factory=list,
+        sa_column=Column(sa.ARRAY(sa.Text()), nullable=False, server_default="{}"),
+    )
     disponible: bool = Field(default=True)
     destacado: bool = Field(default=False)
 

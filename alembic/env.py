@@ -10,9 +10,11 @@ from app.modules.categorias.model import Categoria
 from app.modules.ingredientes.model import Ingrediente                     
 from app.modules.productos.model import Producto                           
 from app.modules.direcciones.model import DireccionEntrega                 
-from app.modules.pedidos.model import (                                    
+from app.modules.pedidos.model import (
     EstadoPedido, FormaPago, Pedido, DetallePedido, HistorialEstadoPedido,
 )
+from app.modules.unidades.model import UnidadMedida
+from app.modules.pagos.model import Pago
 
 from app.core.config import settings
 
