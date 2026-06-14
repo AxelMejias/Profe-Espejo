@@ -19,12 +19,17 @@ def mock_ingrediente(
     deleted_at=None,
 ):
     from datetime import datetime
+    from decimal import Decimal
     i = MagicMock()
     i.id = id
     i.nombre = nombre
     i.descripcion = "Descripcion"
     i.unidad_medida = "kg"
     i.es_alergeno = es_alergeno
+    i.costo_unitario = Decimal("10.00")
+    i.stock_cantidad = Decimal("100.000")
+    i.stock_minimo = Decimal("10.000")
+    i.es_producto_terminado = False
     i.created_at = datetime(2024, 1, 1)
     i.updated_at = None
     i.deleted_at = deleted_at
@@ -93,7 +98,7 @@ class TestGetById:
 class TestCreate:
     def test_crear_exitoso(self):
         uow = make_uow()
-        uow.ingredientes.get_by_nombre_any.return_value = None
+        uow.ingredientes.get_by_nombre.return_value = None
         nuevo = mock_ingrediente(10, "Lechuga")
 
         data = IngredienteCreate(
@@ -106,7 +111,7 @@ class TestCreate:
 
     def test_nombre_duplicado_lanza_409(self):
         uow = make_uow()
-        uow.ingredientes.get_by_nombre_any.return_value = mock_ingrediente()
+        uow.ingredientes.get_by_nombre.return_value = mock_ingrediente()
 
         with pytest.raises(HTTPException) as exc:
             service.create(uow, IngredienteCreate(nombre="Tomate", unidad_medida="kg", es_alergeno=False))
@@ -116,7 +121,7 @@ class TestCreate:
 
     def test_alergeno_se_guarda(self):
         uow = make_uow()
-        uow.ingredientes.get_by_nombre_any.return_value = None
+        uow.ingredientes.get_by_nombre.return_value = None
         ingrediente_creado = mock_ingrediente(1, "Mani", es_alergeno=True)
 
         data = IngredienteCreate(nombre="Mani", unidad_medida="gr", es_alergeno=True)
@@ -131,7 +136,7 @@ class TestUpdate:
         uow = make_uow()
         ing = mock_ingrediente(1, "Viejo")
         uow.ingredientes.get_by_id.return_value = ing
-        uow.ingredientes.get_by_nombre_any.return_value = None
+        uow.ingredientes.get_by_nombre.return_value = None
         uow.ingredientes.add.return_value = ing
 
         service.update(uow, 1, IngredienteUpdate(nombre="Nuevo"))
@@ -142,7 +147,7 @@ class TestUpdate:
         uow = make_uow()
         ing = mock_ingrediente(1, "Original")
         uow.ingredientes.get_by_id.return_value = ing
-        uow.ingredientes.get_by_nombre_any.return_value = mock_ingrediente(2, "Ocupado")
+        uow.ingredientes.get_by_nombre.return_value = mock_ingrediente(2, "Ocupado")
 
         with pytest.raises(HTTPException) as exc:
             service.update(uow, 1, IngredienteUpdate(nombre="Ocupado"))
@@ -159,7 +164,7 @@ class TestUpdate:
 
         service.update(uow, 1, IngredienteUpdate(es_alergeno=True))
 
-        uow.ingredientes.get_by_nombre_any.assert_not_called()
+        uow.ingredientes.get_by_nombre.assert_not_called()
 
     def test_update_no_encontrado_lanza_404(self):
         uow = make_uow()

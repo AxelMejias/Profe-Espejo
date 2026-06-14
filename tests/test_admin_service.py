@@ -142,7 +142,7 @@ class TestAsignarRol:
     def test_asignar_rol_no_existe_lanza_404(self):
         uow = make_uow()
         uow.usuarios_admin.get_by_id.return_value = mock_usuario()
-        uow.session.exec.return_value.first.return_value = None  # rol no existe
+        uow.usuarios_admin.get_rol.return_value = None  # rol no existe
 
         with pytest.raises(HTTPException) as exc:
             service.asignar_rol(uow, 1, "ROL_FAKE", actor_id=1)

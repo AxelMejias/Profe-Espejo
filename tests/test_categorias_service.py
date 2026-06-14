@@ -19,6 +19,7 @@ def mock_categoria(id: int = 1, nombre: str = "Hamburguesas", parent_id=None):
     c.nombre = nombre
     c.descripcion = "Desc"
     c.parent_id = parent_id
+    c.imagen_url = None
     c.created_at = datetime(2024, 1, 1)
     c.updated_at = None
     c.deleted_at = None
@@ -158,6 +159,9 @@ class TestDelete:
         uow = make_uow()
         cat = mock_categoria()
         uow.categorias.get_by_id.return_value = cat
+        # Sin productos activos en la categoría ni en sus descendientes
+        uow.categorias.get_descendant_ids.return_value = [1]
+        uow.categorias.count_active_products.return_value = 0
 
         service.delete(uow, 1)
 
