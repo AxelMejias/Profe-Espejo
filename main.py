@@ -35,6 +35,7 @@ from app.modules.unidades.router     import router as unidades_router
 from app.modules.admin.router        import router as admin_router
 from app.modules.uploads.router      import router as uploads_router
 from app.modules.estadisticas.router import router as estadisticas_router
+from app.core.ws_router                import router as ws_router
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -110,6 +111,7 @@ app.include_router(unidades_router)
 app.include_router(admin_router)
 app.include_router(uploads_router)
 app.include_router(estadisticas_router)
+app.include_router(ws_router)
 
 
 @app.get("/", tags=["Root"])
