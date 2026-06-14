@@ -116,16 +116,8 @@ async def mp_webhook(request: Request):
     # ── Notificación WebSocket best-effort cuando el pedido cambió de estado ──
     if result["action"] in ("confirmed", "cancelled"):
         try:
-            with UnitOfWork() as uow:
-                pedido = pedidos_service.get_by_id(
-                    uow,
-                    result["pedido_id"],
-                    requester_user_id=0,
-                    requester_roles=["ADMIN"],
-                )
-            await pedidos_service.emit_ws_evento(
-                pedido.id, pedido.estado_codigo, pedido.model_dump(mode="json")
-            )
+            event = "pago_confirmado" if result["action"] == "confirmed" else None
+            await pedidos_service.emit_ws_evento(result["pedido_id"], event=event)
         except Exception:
             pass
 

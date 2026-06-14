@@ -1,9 +1,10 @@
-from typing import List, Optional
+from typing import List
 from datetime import date
 from decimal import Decimal
 from pydantic import BaseModel
 
 
+# ── Schemas legacy del /dashboard (lo sigue usando el front por ahora) ──────────
 class ProductoMasVendido(BaseModel):
     producto_id: int
     nombre: str
@@ -17,35 +18,47 @@ class VentasPorPeriodo(BaseModel):
     ingreso: Decimal
 
 
-class PedidosPorEstadoItem(BaseModel):
+class DashboardResponse(BaseModel):
+    ingreso_total: Decimal
+    pedidos_completados: int
+    ticket_promedio: Decimal
+    productos_mas_vendidos: List[ProductoMasVendido]
+    ventas_por_dia: List[VentasPorPeriodo]
+
+
+# ── Schemas de los 5 endpoints de la Especificación v6.0 (§11) ──────────────────
+
+class VentasPeriodoItem(BaseModel):
+    """GET /estadisticas/ventas — una fila por período (LineChart)."""
+    periodo: date
+    total_ventas: Decimal
+    cantidad_pedidos: int
+
+
+class ProductoTopItem(BaseModel):
+    """GET /estadisticas/productos-top — ranking (BarChart). EST-02: subtotal_snap."""
+    producto_id: int
+    nombre: str
+    cantidad_vendida: int
+    ingresos: Decimal
+
+
+class PedidosEstadoItem(BaseModel):
+    """GET /estadisticas/pedidos-por-estado — distribución (PieChart)."""
     estado_codigo: str
     cantidad: int
 
 
-class IngresosPorFormaPagoItem(BaseModel):
-    forma_pago: str
+class IngresosFormaPagoItem(BaseModel):
+    """GET /estadisticas/ingresos — por forma de pago (BarChart horizontal)."""
+    forma_pago_codigo: str
     total: Decimal
-    cantidad_pedidos: int
+    cantidad: int
 
 
 class ResumenResponse(BaseModel):
-    ingreso_total: Decimal
-    pedidos_completados: int
+    """GET /estadisticas/resumen — KPI cards."""
+    ventas_hoy: Decimal
     ticket_promedio: Decimal
     pedidos_activos: int
-
-
-class DashboardResponse(BaseModel):
-    # Ingresos confirmados (solo pagos approved, EST-03)
-    ingreso_total: Decimal
-    # Pedidos (excluye CANCELADO, EST-01)
-    pedidos_completados: int
-    # Promedio por pedido
-    ticket_promedio: Decimal
-    # Top productos (EST-02: usa subtotal_snap)
-    productos_mas_vendidos: List[ProductoMasVendido]
-    # Ventas por día en el período
-    ventas_por_dia: List[VentasPorPeriodo]
-    pedidos_activos: int = 0
-    pedidos_por_estado: List[PedidosPorEstadoItem] = []
-    ingresos_por_forma_pago: List[IngresosPorFormaPagoItem] = []
+    ventas_mes: Decimal

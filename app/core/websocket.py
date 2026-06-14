@@ -46,18 +46,18 @@ class ConnectionManager:
         if room in self.rooms and not self.rooms[room]:
             del self.rooms[room]
 
-    async def broadcast_to_order(self, order_id: int, event_type: str, data: dict[str, Any]) -> None:
-        await self._emit_to_room(f"order:{order_id}", event_type, data)
+    async def broadcast_to_order(self, order_id: int, payload: dict[str, Any]) -> None:
+        """Emite el evento (ya formateado) a la room del pedido."""
+        await self._emit_to_room(f"order:{order_id}", payload)
 
-    async def broadcast_to_role(self, role: str, event_type: str, data: dict[str, Any]) -> None:
-        await self._emit_to_room(f"role:{role.lower()}", event_type, data)
+    async def broadcast_to_role(self, role: str, payload: dict[str, Any]) -> None:
+        await self._emit_to_room(f"role:{role.lower()}", payload)
 
     async def broadcast_to_roles(
-        self, roles: list[str], event_type: str, data: dict[str, Any]
+        self, roles: list[str], payload: dict[str, Any]
     ) -> None:
         """Envía a múltiples rooms de rol sin duplicar envíos a sockets en varias rooms."""
         sent_to: set[WebSocket] = set()
-        payload = {"event": event_type, "data": data}
         for role in roles:
             room = f"role:{role.lower()}"
             if room not in self.rooms:
@@ -81,10 +81,9 @@ class ConnectionManager:
         self.rooms.setdefault(room, set()).add(websocket)
         self.socket_rooms.setdefault(websocket, set()).add(room)
 
-    async def _emit_to_room(self, room: str, event_type: str, data: dict[str, Any]) -> None:
+    async def _emit_to_room(self, room: str, payload: dict[str, Any]) -> None:
         if room not in self.rooms:
             return
-        payload = {"event": event_type, "data": data}
         for conn in list(self.rooms[room]):
             try:
                 await conn.send_json(payload)

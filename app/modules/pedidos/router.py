@@ -1,9 +1,6 @@
-import json
 from typing import Annotated, Optional
-from fastapi import APIRouter, Depends, Query, Path, status, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Path, status
 from fastapi.responses import RedirectResponse
-from jose import JWTError
-from jose.exceptions import ExpiredSignatureError
 
 from app.modules.pedidos.schemas import (
     PedidoCreate, PedidoResponse, PaginatedPedidos,
@@ -15,7 +12,6 @@ from app.core.config import settings
 from app.core.dependencies import (
     get_current_user_id, get_current_user_payload, require_role,
 )
-from app.core.security import decode_access_token
 from app.core.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/v1/pedidos", tags=["Pedidos"])
@@ -86,7 +82,7 @@ async def mp_callback(
     if result_status == "success":
         with UnitOfWork() as uow:
             result = service.confirmar_pago_mp(uow, pedido_id)
-        await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+        await service.emit_ws_evento(result.id, event="pago_confirmado")
         url = f"{frontend}/pedido-exitoso?collection_status=approved&external_reference={pedido_id}&payment_id={pid or ''}"
 
     elif result_status == "failure":
@@ -109,7 +105,7 @@ async def confirmar_pago_mp(
 ):
     with UnitOfWork() as uow:
         result = service.confirmar_pago_mp(uow, pedido_id)
-    await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+    await service.emit_ws_evento(result.id, event="pago_confirmado")
     return result
 
 
@@ -165,7 +161,7 @@ async def crear_pedido(
 ):
     with UnitOfWork() as uow:
         result = service.crear_pedido(uow, data, usuario_id)
-    await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+    await service.emit_ws_evento(result.id)
     return result
 
 
@@ -192,7 +188,7 @@ async def avanzar_estado(
             actor_roles=payload.get("roles", []),
             restaurar_stock=data.restaurar_stock,
         )
-    await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+    await service.emit_ws_evento(result.id)
     return result
 
 
@@ -214,112 +210,5 @@ async def cancelar_pedido(
             cliente_user_id=usuario_id,
             restaurar_stock=data.restaurar_stock,
         )
-    await service.emit_ws_evento(result.id, result.estado_codigo, result.model_dump(mode="json"))
+    await service.emit_ws_evento(result.id)
     return result
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# WebSocket — canal bidireccional autenticado para tiempo real
-#
-# URL:  ws://<host>/api/v1/pedidos/ws
-# Auth: cookie httpOnly "access_token" (se envía automáticamente por el browser)
-#
-# Mensajes cliente → backend:
-#   {"action": "subscribe-order",   "order_id": 5}
-#   {"action": "unsubscribe-order", "order_id": 5}
-#
-# Mensajes backend → cliente:
-#   {"event": "NUEVO_PEDIDO",          "data": {...pedido...}}
-#   {"event": "PEDIDO_CONFIRMADO",     "data": {...pedido...}}
-#   {"event": "PEDIDO_EN_PREPARACION", "data": {...pedido...}}
-#   {"event": "PEDIDO_EN_CAMINO",      "data": {...pedido...}}
-#   {"event": "PEDIDO_ENTREGADO",      "data": {...pedido...}}
-#   {"event": "PEDIDO_CANCELADO",      "data": {...pedido...}}
-#   {"event": "SUBSCRIBED",            "data": {"order_id": 5}}
-#   {"event": "ERROR",                 "data": {"detail": "..."}}
-# ──────────────────────────────────────────────────────────────────────────────
-
-_WS_STAFF_ROLES = {"ADMIN", "PEDIDOS"}
-
-
-@router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    from app.core.websocket import manager
-
-    # 1. Leer token de la cookie httpOnly
-    token = websocket.cookies.get("access_token")
-    if not token:
-        await websocket.accept()
-        await websocket.close(code=1008, reason="Token requerido")
-        return
-
-    # 2. Validar JWT — 4001 expirado (cliente puede refrescar), 1008 inválido
-    try:
-        payload = decode_access_token(token)
-    except ExpiredSignatureError:
-        await websocket.accept()
-        await websocket.close(code=4001, reason="Token expirado")
-        return
-    except JWTError:
-        await websocket.accept()
-        await websocket.close(code=1008, reason="Token inválido")
-        return
-
-    user_id_str = payload.get("sub")
-    roles: list[str] = payload.get("roles", [])
-
-    if not user_id_str:
-        await websocket.accept()
-        await websocket.close(code=1008, reason="Token inválido")
-        return
-
-    user_id = int(user_id_str)
-
-    # 3. Conectar: la primera sala es el rol primario; las demás se agregan al espejo
-    primary_role = roles[0].lower() if roles else "client"
-    await manager.connect(websocket, role=primary_role, user_id=user_id)
-    for role in roles[1:]:
-        manager._join_room(websocket, f"role:{role.lower()}")
-
-    # 4. Bucle de mensajes
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-
-            action = msg.get("action")
-
-            if action == "subscribe-order":
-                order_id = msg.get("order_id")
-                if not isinstance(order_id, int):
-                    continue
-
-                # Clientes solo pueden suscribirse a sus propios pedidos
-                if not any(r in _WS_STAFF_ROLES for r in roles):
-                    with UnitOfWork() as uow:
-                        pedido = uow.pedidos.get_by_id_for_user(order_id, user_id)
-                    if not pedido:
-                        await websocket.send_json({
-                            "event": "ERROR",
-                            "data": {"detail": "No autorizado para este pedido"},
-                        })
-                        continue
-
-                manager.join_order_room(websocket, order_id)
-                await websocket.send_json({
-                    "event": "SUBSCRIBED",
-                    "data": {"order_id": order_id},
-                })
-
-            elif action == "unsubscribe-order":
-                order_id = msg.get("order_id")
-                if isinstance(order_id, int):
-                    manager.leave_order_room(websocket, order_id)
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception:
-        manager.disconnect(websocket)

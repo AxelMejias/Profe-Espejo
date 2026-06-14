@@ -53,14 +53,9 @@ class TestAvanzarEstado:
         service.avanzar_estado(uow, 1, "EN_PREP", None, 99, ["ADMIN"])
         assert pedido.estado_codigo == "EN_PREP"
 
-    def test_en_prep_a_en_camino(self):
+    def test_en_prep_a_entregado(self):
         uow, pedido = _uow_con_pedido("EN_PREP")
-        service.avanzar_estado(uow, 1, "EN_CAMINO", None, 99, ["PEDIDOS"])
-        assert pedido.estado_codigo == "EN_CAMINO"
-
-    def test_en_camino_a_entregado(self):
-        uow, pedido = _uow_con_pedido("EN_CAMINO")
-        service.avanzar_estado(uow, 1, "ENTREGADO", None, 99, ["ADMIN"])
+        service.avanzar_estado(uow, 1, "ENTREGADO", None, 99, ["PEDIDOS"])
         assert pedido.estado_codigo == "ENTREGADO"
 
     def test_cancelar_desde_pendiente(self):
@@ -112,11 +107,11 @@ class TestAvanzarEstado:
         assert exc.value.detail["code"] == "ESTADO_NOT_FOUND"
 
     def test_transicion_invalida_lanza_409(self):
-        """No se puede ir de PENDIENTE → EN_CAMINO (saltando estados)."""
+        """No se puede ir de PENDIENTE → ENTREGADO (saltando estados)."""
         uow, _ = _uow_con_pedido("PENDIENTE")
 
         with pytest.raises(HTTPException) as exc:
-            service.avanzar_estado(uow, 1, "EN_CAMINO", None, 1, ["ADMIN"])
+            service.avanzar_estado(uow, 1, "ENTREGADO", None, 1, ["ADMIN"])
 
         assert exc.value.status_code == 409
         assert exc.value.detail["code"] == "INVALID_TRANSITION"
@@ -571,12 +566,18 @@ class TestFSMMap:
             assert "CANCELADO" in service._TRANSICIONES_VALIDAS[estado], \
                 f"CANCELADO debería ser alcanzable desde {estado}"
 
-    def test_en_camino_solo_va_a_entregado(self):
-        assert service._TRANSICIONES_VALIDAS["EN_CAMINO"] == {"ENTREGADO"}
+    def test_en_prep_va_a_entregado_o_cancelado(self):
+        assert service._TRANSICIONES_VALIDAS["EN_PREP"] == {"ENTREGADO", "CANCELADO"}
+
+    def test_fsm_tiene_exactamente_cinco_estados(self):
+        """FSM v7: exactamente 5 estados, sin EN_CAMINO ni ESPERANDO_PAGO."""
+        assert set(service._TRANSICIONES_VALIDAS) == {
+            "PENDIENTE", "CONFIRMADO", "EN_PREP", "ENTREGADO", "CANCELADO",
+        }
 
     def test_client_puede_cancelar_desde_estados_abiertos(self):
-        """CLIENT puede cancelar desde ESPERANDO_PAGO, PENDIENTE y CONFIRMADO."""
-        permitidos = {"ESPERANDO_PAGO", "PENDIENTE", "CONFIRMADO"}
+        """CLIENT puede cancelar desde PENDIENTE y CONFIRMADO."""
+        assert set(service._TRANSICIONES_CLIENT) == {"PENDIENTE", "CONFIRMADO"}
         for estado, destinos in service._TRANSICIONES_CLIENT.items():
             assert "CANCELADO" in destinos, (
                 f"CANCELADO debería ser alcanzable desde {estado}"
@@ -589,15 +590,12 @@ class TestFSMMap:
 
 class TestCrearPedidoMP:
     """
-    Verifica que al elegir MERCADOPAGO como forma de pago:
-      - Se llama al SDK de MP para crear la preferencia.
-      - Se guarda el preference_id en el pedido.
-      - La respuesta incluye el init_point (URL de checkout).
-      - Un error del SDK eleva 502 BAD GATEWAY.
+    Flujo Checkout Pro (preferencia + redirect) con FSM de 5 estados:
+      - Al elegir MERCADOPAGO se crea la preferencia vía SDK y se devuelve init_point.
+      - El pedido nace en PENDIENTE (sin ESPERANDO_PAGO); el pago lo pasa a CONFIRMADO.
     """
 
     def _setup_uow_mp(self):
-        """UoW configurado para pedido con MERCADOPAGO como forma de pago."""
         uow = make_uow()
 
         forma_pago = MagicMock()
@@ -609,7 +607,6 @@ class TestCrearPedidoMP:
 
         producto = mock_producto(stock_cantidad=10)
         uow.productos.get_by_id.return_value = producto
-        # Sin insumos → la validación de stock se salta limpiamente
         uow.productos.get_ingrediente_links.return_value = []
 
         uow.pedidos.get_detalles.return_value = []
@@ -617,13 +614,11 @@ class TestCrearPedidoMP:
 
     @staticmethod
     def _asignar_id(p):
-        """Side effect para uow.pedidos.add: simula el flush del ORM asignando id=1."""
         p.id = 1
         return p
 
     @staticmethod
     def _sdk_exitoso():
-        """SDK mockeado que responde con éxito (status 201)."""
         sdk = MagicMock()
         sdk.preference.return_value.create.return_value = {
             "status": 201,
@@ -650,22 +645,6 @@ class TestCrearPedidoMP:
         mock_sdk_class.return_value.preference.return_value.create.assert_called_once()
 
     @patch("mercadopago.SDK")
-    def test_mp_guarda_preference_id_en_pedido(self, mock_sdk_class):
-        mock_sdk_class.return_value = self._sdk_exitoso()
-        uow = self._setup_uow_mp()
-        uow.pedidos.add.side_effect = self._asignar_id
-
-        data = PedidoCreate(
-            forma_pago_codigo="MERCADOPAGO",
-            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
-        )
-        service.crear_pedido(uow, data, usuario_id=1)
-
-        # La segunda llamada a add() lleva el pedido ya con mp_preference_id asignado
-        pedido_persistido = uow.pedidos.add.call_args_list[-1][0][0]
-        assert pedido_persistido.mp_preference_id == "pref_test_abc"
-
-    @patch("mercadopago.SDK")
     def test_mp_devuelve_init_point_en_response(self, mock_sdk_class):
         mock_sdk_class.return_value = self._sdk_exitoso()
         uow = self._setup_uow_mp()
@@ -680,6 +659,27 @@ class TestCrearPedidoMP:
         assert result.init_point == (
             "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref_test_abc"
         )
+
+    @patch("mercadopago.SDK")
+    def test_mp_pedido_nace_pendiente(self, mock_sdk_class):
+        mock_sdk_class.return_value = self._sdk_exitoso()
+        uow = self._setup_uow_mp()
+        pedido_creado = None
+
+        def capturar(p):
+            nonlocal pedido_creado
+            pedido_creado = p
+            p.id = 1
+            return p
+        uow.pedidos.add.side_effect = capturar
+
+        data = PedidoCreate(
+            forma_pago_codigo="MERCADOPAGO",
+            items=[ItemPedidoRequest(producto_id=1, cantidad=1)],
+        )
+        service.crear_pedido(uow, data, usuario_id=1)
+
+        assert pedido_creado.estado_codigo == "PENDIENTE"
 
     @patch("mercadopago.SDK")
     def test_mp_error_de_sdk_lanza_502(self, mock_sdk_class):
