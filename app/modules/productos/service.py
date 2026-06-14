@@ -62,9 +62,10 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
         nombre=producto.nombre,
         descripcion=producto.descripcion,
         imagenes_url=producto.imagenes_url or [],
-        precio=producto.precio,
+        precio_base=producto.precio_base,
         margen_ganancia=producto.margen_ganancia,
         costo_total_insumos=costo_total,
+        stock_cantidad=producto.stock_cantidad,
         disponible=producto.disponible,
         destacado=producto.destacado,
         unidad_venta_id=producto.unidad_venta_id,
@@ -166,7 +167,7 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
         nombre=data.nombre,
         descripcion=data.descripcion,
         imagenes_url=data.imagenes_url,
-        precio=precio,
+        precio_base=precio,
         margen_ganancia=data.margen_ganancia,
         disponible=data.disponible,
         unidad_venta_id=data.unidad_venta_id,
@@ -221,14 +222,14 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
                 cantidad=float(item.cantidad),
             )
         producto.margen_ganancia = margen
-        producto.precio = _calcular_precio(insumos_orm, cantidades, margen)
+        producto.precio_base = _calcular_precio(insumos_orm, cantidades, margen)
 
     elif data.margen_ganancia is not None:
         links = uow.productos.get_ingrediente_links(producto_id)
         cantidades = {l.ingrediente_id: Decimal(str(l.cantidad)) for l in links}
         insumos_orm = [uow.ingredientes.get_by_id(iid) for iid in cantidades]
         producto.margen_ganancia = data.margen_ganancia
-        producto.precio = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
+        producto.precio_base = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
 
     if data.categoria_ids is not None:
         cats = uow.categorias.get_by_ids(data.categoria_ids)
@@ -244,6 +245,19 @@ def toggle_disponibilidad(uow, producto_id: int, disponible: bool) -> ProductoRe
     if not producto:
         _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
     producto.disponible = disponible
+    producto.updated_at = datetime.utcnow()
+    uow.productos.add(producto)
+    return _build_response(uow, producto)
+
+
+def set_stock(uow, producto_id: int, stock_cantidad: int) -> ProductoRead:
+    """Actualiza el stock numérico del producto (rol STOCK, doc §4.2)."""
+    producto = uow.productos.get_by_id(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+    if stock_cantidad < 0:
+        _problem("STOCK_NEGATIVO", "El stock no puede ser negativo", status.HTTP_400_BAD_REQUEST)
+    producto.stock_cantidad = stock_cantidad
     producto.updated_at = datetime.utcnow()
     uow.productos.add(producto)
     return _build_response(uow, producto)

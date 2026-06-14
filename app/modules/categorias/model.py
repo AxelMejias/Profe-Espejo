@@ -14,6 +14,7 @@ class Categoria(SQLModel, table=True):
     nombre: str = Field(min_length=2, max_length=100)
     descripcion: Optional[str] = Field(default=None, max_length=255)
     parent_id: Optional[int] = Field(default=None, foreign_key="categoria.id")
+    imagen_url: Optional[str] = Field(default=None)  # URL de Cloudinary (doc §3.2)
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = Field(default=None)

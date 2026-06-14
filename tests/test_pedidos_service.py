@@ -347,7 +347,7 @@ class TestCrearPedido:
     def test_costo_envio_por_defecto(self):
         """Con dirección de entrega, el costo de envío por defecto es $50."""
         uow, producto, _ = self._setup_uow_crear()
-        producto.precio = Decimal("100.00")
+        producto.precio_base = Decimal("100.00")
         uow.direcciones.get_by_id_for_user.return_value = MagicMock()  # dirección válida
 
         pedido_creado = None

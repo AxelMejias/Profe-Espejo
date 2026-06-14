@@ -191,8 +191,9 @@ def _seed_catalogo_demo(session: Session):
             nombre=nombre,
             descripcion=descripcion,
             imagenes_url=[imagen],
-            precio=precio,
+            precio_base=precio,
             margen_ganancia=margen,
+            stock_cantidad=100,
             disponible=True,
             unidad_venta_id=unidad_venta_id,
         )

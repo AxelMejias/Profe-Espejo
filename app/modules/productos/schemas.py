@@ -50,6 +50,11 @@ class ProductoUpdate(BaseModel):
     insumos: Optional[List[InsumoEnProductoCreate]] = None
 
 
+class StockUpdate(BaseModel):
+    """Actualización de stock por rol STOCK (doc §4.2)."""
+    stock_cantidad: int = Field(ge=0)
+
+
 class CategoriaSimple(BaseModel):
     id: int
     nombre: str
@@ -63,9 +68,10 @@ class ProductoRead(BaseModel):
     nombre: str
     descripcion: Optional[str]
     imagenes_url: List[str] = Field(default_factory=list)
-    precio: Decimal
+    precio_base: Decimal
     margen_ganancia: Decimal
     costo_total_insumos: Decimal
+    stock_cantidad: int = 0
     disponible: bool
     destacado: bool = False
     unidad_venta_id: Optional[int] = None

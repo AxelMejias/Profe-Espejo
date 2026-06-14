@@ -78,7 +78,7 @@ def mock_producto(
     p = MagicMock()
     p.id = id
     p.nombre = nombre
-    p.precio = precio if precio is not None else Decimal("500.00")
+    p.precio_base = precio if precio is not None else Decimal("500.00")
     p.disponible = disponible
     p.stock_cantidad = stock_cantidad
     p.deleted_at = deleted_at

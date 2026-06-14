@@ -49,9 +49,9 @@ class ProductoRepository(BaseRepository[Producto]):
         if nombre:
             query = query.where(Producto.nombre.icontains(nombre))
         if precio_min is not None:
-            query = query.where(Producto.precio >= precio_min)
+            query = query.where(Producto.precio_base >= precio_min)
         if precio_max is not None:
-            query = query.where(Producto.precio <= precio_max)
+            query = query.where(Producto.precio_base <= precio_max)
         if categoria_ids:
             query = query.join(ProductoCategoria).where(
                 ProductoCategoria.categoria_id.in_(categoria_ids)

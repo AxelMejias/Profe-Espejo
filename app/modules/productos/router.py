@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 import openpyxl
 
 from app.modules.productos.schemas import (
-    ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos,
+    ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos, StockUpdate,
 )
 from app.modules.productos import service
 from app.core.dependencies import require_role
@@ -38,7 +38,7 @@ def exportar_productos(_=_ADMIN):
                     insumos_parts.append(f"{ing.nombre}:{link.cantidad}")
             rows.append([
                 prod.id, prod.nombre, prod.descripcion or "",
-                float(prod.precio), float(prod.margen_ganancia) * 100,
+                float(prod.precio_base), float(prod.margen_ganancia) * 100,
                 "Sí" if prod.disponible else "No",
                 cats, ", ".join(insumos_parts),
             ])
@@ -163,7 +163,7 @@ def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
                     producto = Producto(
                         nombre=nombre,
                         descripcion=descripcion or None,
-                        precio=precio,
+                        precio_base=precio,
                         margen_ganancia=margen,
                         disponible=disponible,
                     )
@@ -263,6 +263,16 @@ def toggle_disponibilidad(
 ):
     with UnitOfWork() as uow:
         return service.toggle_disponibilidad(uow, producto_id, disponible)
+
+
+@router.patch("/{producto_id}/stock", response_model=ProductoRead, summary="Actualizar stock_cantidad (ADMIN / STOCK)")
+def actualizar_stock(
+    producto_id: Annotated[int, Path(ge=1)],
+    data: StockUpdate,
+    _=_DISPONIBILIDAD,
+):
+    with UnitOfWork() as uow:
+        return service.set_stock(uow, producto_id, data.stock_cantidad)
 
 
 @router.patch("/{producto_id}/destacar", response_model=ProductoRead, summary="Toggle destacado en Home")

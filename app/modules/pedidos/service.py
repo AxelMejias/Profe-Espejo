@@ -247,7 +247,7 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
                      f"Producto '{producto.nombre}' no está disponible",
                      status.HTTP_409_CONFLICT)
 
-        precio_snap   = producto.precio
+        precio_snap   = producto.precio_base
         subtotal_item = precio_snap * item.cantidad
         subtotal     += subtotal_item
 
