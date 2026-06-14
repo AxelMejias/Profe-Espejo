@@ -7,8 +7,9 @@ del redirect del browser. MP lo invoca con:
   - body:  {"type":"payment","data":{"id":"<payment_id>"}}
   - headers: x-signature, x-request-id  → validación HMAC
 """
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 from app.modules.pagos import service
 from app.modules.pagos.schemas import PagoResponse
@@ -36,6 +37,34 @@ async def redirect_after_pago(pedido_id: int, mp_status: str, request: Request):
     if qs:
         url += f"?{qs}"
     return RedirectResponse(url=url, status_code=302)
+
+
+class CrearPagoRequest(BaseModel):
+    pedido_id: int
+    token: str
+    cuotas: int = 1
+    payment_method_id: str
+
+
+@router.post(
+    "/crear",
+    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    summary="[No aplicable] Crear pago con token de tarjeta (Checkout API/Bricks)",
+    dependencies=[Depends(require_role(["CLIENT"]))],
+)
+def crear_pago(_body: CrearPagoRequest):
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "detail": (
+                "Este endpoint corresponde al flujo Checkout API con tokenización en el frontend. "
+                "Food Store usa Checkout PRO (redirect): el pago se inicia creando el pedido "
+                "(POST /api/v1/pedidos) y se confirma automáticamente vía webhook IPN. "
+                "No se requiere tokenización del lado del cliente."
+            ),
+            "code": "CHECKOUT_PRO_FLOW",
+        },
+    )
 
 
 @router.get(

@@ -25,6 +25,19 @@ from app.modules.estadisticas.schemas import (
 _ESTADO_CANCELADO = "CANCELADO"
 
 
+_ESTADOS_ACTIVOS = {"PENDIENTE", "CONFIRMADO", "EN_PREP", "EN_CAMINO"}
+
+
+def _count_pedidos_activos(session: Session) -> int:
+    return int(session.exec(
+        select(func.count(Pedido.id))
+        .where(
+            Pedido.estado_codigo.in_(_ESTADOS_ACTIVOS),
+            Pedido.deleted_at.is_(None),
+        )
+    ).one())
+
+
 def get_pedidos_por_estado(session: Session) -> List[PedidosPorEstadoItem]:
     rows = session.exec(
         select(
@@ -184,6 +197,7 @@ def get_resumen_kpis(
         ingreso_total=ingreso_total,
         pedidos_completados=pedidos_completados,
         ticket_promedio=ticket_promedio,
+        pedidos_activos=_count_pedidos_activos(session),
     )
 
 
@@ -276,6 +290,7 @@ def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> Das
         ingreso_total=ingreso_total,
         pedidos_completados=pedidos_completados,
         ticket_promedio=ticket_promedio,
+        pedidos_activos=_count_pedidos_activos(session),
         productos_mas_vendidos=productos_mas_vendidos,
         ventas_por_dia=ventas_por_dia,
         pedidos_por_estado=pedidos_por_estado,

@@ -32,6 +32,7 @@ class ResumenResponse(BaseModel):
     ingreso_total: Decimal
     pedidos_completados: int
     ticket_promedio: Decimal
+    pedidos_activos: int
 
 
 class DashboardResponse(BaseModel):
@@ -45,5 +46,6 @@ class DashboardResponse(BaseModel):
     productos_mas_vendidos: List[ProductoMasVendido]
     # Ventas por día en el período
     ventas_por_dia: List[VentasPorPeriodo]
+    pedidos_activos: int = 0
     pedidos_por_estado: List[PedidosPorEstadoItem] = []
     ingresos_por_forma_pago: List[IngresosPorFormaPagoItem] = []
