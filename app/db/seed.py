@@ -22,7 +22,8 @@ def seed():
         _seed_admin(session)
         _seed_cocina(session)
         _seed_stock(session)
-        _seed_catalogo_demo(session)
+        _seed_cliente(session)
+        _seed_catalogo(session)
         print("Seed completado.")
 
 
@@ -70,7 +71,7 @@ def _seed_estados_pedido(session: Session):
 
 
 def _seed_formas_pago(session: Session):
-    # MercadoPago Checkout API operativo (módulo pagos + webhook IPN).
+    # MercadoPago Checkout PRO operativo (módulo pagos + webhook IPN).
     formas = [
         FormaPago(codigo="EFECTIVO",     descripcion="Efectivo",                  habilitado=True),
         FormaPago(codigo="TRANSFERENCIA", descripcion="Transferencia bancaria",     habilitado=True),
@@ -82,91 +83,164 @@ def _seed_formas_pago(session: Session):
     session.commit()
 
 
-def _seed_admin(session: Session):
-    if session.exec(select(Usuario).where(Usuario.email == "admin@foodstore.com")).first():
+def _seed_usuario(session: Session, *, nombre, apellido, email, password, rol):
+    """Crea un usuario con un rol asignado si todavía no existe (idempotente)."""
+    if session.exec(select(Usuario).where(Usuario.email == email)).first():
         return
-    admin = Usuario(
-        nombre="Admin",
-        apellido="FoodStore",
-        email="admin@foodstore.com",
-        password_hash=hash_password("Admin1234!"),
-    )
-    session.add(admin)
+    u = Usuario(nombre=nombre, apellido=apellido, email=email, password_hash=hash_password(password))
+    session.add(u)
     session.flush()
-    session.add(UsuarioRol(usuario_id=admin.id, rol_codigo="ADMIN"))
+    session.add(UsuarioRol(usuario_id=u.id, rol_codigo=rol))
     session.commit()
+
+
+def _seed_admin(session: Session):
+    _seed_usuario(session, nombre="Admin", apellido="FoodStore",
+                  email="admin@foodstore.com", password="Admin1234!", rol="ADMIN")
 
 
 def _seed_cocina(session: Session):
-    if session.exec(select(Usuario).where(Usuario.email == "cocina@foodstore.com")).first():
-        return
-    cocina = Usuario(
-        nombre="Carlos",
-        apellido="Cocina",
-        email="cocina@foodstore.com",
-        password_hash=hash_password("Cocina1234!"),
-    )
-    session.add(cocina)
-    session.flush()
-    session.add(UsuarioRol(usuario_id=cocina.id, rol_codigo="PEDIDOS"))
-    session.commit()
+    _seed_usuario(session, nombre="Carlos", apellido="Cocina",
+                  email="cocina@foodstore.com", password="Cocina1234!", rol="PEDIDOS")
 
 
 def _seed_stock(session: Session):
-    if session.exec(select(Usuario).where(Usuario.email == "stock@foodstore.com")).first():
-        return
-    stock = Usuario(
-        nombre="Laura",
-        apellido="Stock",
-        email="stock@foodstore.com",
-        password_hash=hash_password("Stock1234!"),
-    )
-    session.add(stock)
-    session.flush()
-    session.add(UsuarioRol(usuario_id=stock.id, rol_codigo="STOCK"))
-    session.commit()
+    _seed_usuario(session, nombre="Laura", apellido="Stock",
+                  email="stock@foodstore.com", password="Stock1234!", rol="STOCK")
 
 
-def _seed_catalogo_demo(session: Session):
+def _seed_cliente(session: Session):
+    # Cuenta de cliente pre-creada: permite probar la tienda sin registrarse ni usar Google.
+    _seed_usuario(session, nombre="Cliente", apellido="Demo",
+                  email="cliente@foodstore.com", password="Cliente1234!", rol="CLIENT")
+
+
+# ── Catálogo ────────────────────────────────────────────────────────────────────
+
+_IMG = "https://res.cloudinary.com/dy5cbcgcj/image/upload"
+
+# Categorías: (nombre, descripcion, nombre_padre|None)
+_CATEGORIAS = [
+    ("Comidas",      None,                          None),
+    ("Bebidas",      None,                          None),
+    ("Hamburguesas", None,                          "Comidas"),
+    ("Combos",       "Arma tu combo completo",      "Comidas"),
+    ("Empanadas",    None,                          "Comidas"),
+    ("Sandwich",     None,                          "Comidas"),
+    ("Refrescos",    "Fríos y calientes",           "Bebidas"),
+    ("Postres",      "Dulces para cerrar",          "Bebidas"),
+    ("Jugos",        "Jugos Frescos y Naturales",   "Bebidas"),
+]
+
+# Insumos: (nombre, unidad_medida, es_alergeno, costo_unitario, stock, es_producto_terminado, descripcion)
+_INSUMOS = [
+    ("Medallon de carne 150g",  "UNIDAD", False, "2500", "998",  False, "Medallon de carne vacuna, 150g."),
+    ("Pan brioche",             "UNIDAD", True,  "1000", "998",  False, "Pan artesanal con semillas de sesamo"),
+    ("Hoja de lechuga",         "UNIDAD", False, "150",  "1000", False, "Lechuga fresca"),
+    ("Tomate",                  "UNIDAD", False, "300",  "997",  False, "Tomate fresco en rodajas"),
+    ("Queso cheddar",           "UNIDAD", True,  "700",  "998",  False, "Feta de queso cheddar madurado, 25g"),
+    ("Aros de cebolla",         "UNIDAD", False, "250",  "996",  False, "Cebolla en aros"),
+    ("Panceta",                 "G",      False, "12",   "960",  False, "Panceta ahumada crocante"),
+    ("Salsa BBQ",               "G",      False, "10",   "985",  False, "Salsa barbecue ahumada"),
+    ("Ketchup",                 "G",      False, "6",    "985",  False, "Salsa de tomate"),
+    ("Mayonesa",                "G",      True,  "8",    "970",  False, "Mayonesa casera"),
+    ("Chocolate",               "G",      True,  "10",   "1000", False, "Cobertura de chocolate negro"),
+    ("Harina de trigo",         "G",      True,  "4",    "1000", False, "Harina"),
+    ("Huevo",                   "UNIDAD", True,  "300",  "999",  False, "Huevo de gallina"),
+    ("Azucar",                  "G",      False, "4",    "1000", False, "Azucar refinada"),
+    ("Helado de vainilla",      "G",      True,  "12",   "1000", False, "Crema de vainilla artesanal"),
+    ("Crema de leche",          "ML",     True,  "8",    "1000", False, "Crema para reposteria"),
+    ("Naranja",                 "UNIDAD", False, "1350", "1000", False, "Naranja fresca exprimida"),
+    ("Tapa de empanada",        "UNIDAD", False, "200",  "999",  False, "Base crocante para el relleno de empanada."),
+    ("Carne Picada",            "G",      False, "4",    "930",  False, "Carne picada de vaca de calidad."),
+    ("Cebolla",                 "G",      False, "3",    "999",  False, "Cebolla fresca rehogada. 30g."),
+    ("Aceitunas",               "UNIDAD", False, "50",   "998",  False, "Aceitunas verdes picadas"),
+    # Botellas: productos terminados (se compran y revenden tal cual).
+    ("Botella de Agua Mineral", "UNIDAD", False, "1540", "1000", True,  "Botella de Agua Mineral sin gas, 500ml"),
+    ("Botella de Coca Cola",    "UNIDAD", False, "1923", "994",  True,  "Botella de Coca Cola chica, 500ml"),
+    ("Pan de Miga",             "UNIDAD", False, "200",  "998",  False, "Rebanadas de pan de miga, 50g"),
+    ("Jamón cocido",            "G",      False, "6",    "950",  False, "Fetas de Jamón cocido"),
+    ("Queso Barra",             "G",      False, "6",    "950",  False, "Fetas de queso barra"),
+]
+
+# Productos: (nombre, descripcion, categoria, destacado, imagen, receta[(insumo, cantidad)])
+_PRODUCTOS = [
+    ("Hamburguesa Clasica",
+     "Pan brioche, Medallon de carne 150g, Mayonesa, Ketchup, Queso cheddar, Tomate, Aros de cebolla",
+     "Hamburguesas", True, f"{_IMG}/v1780891530/foodstore/productos/vqkfdlpz7cvi6muah6t1.png",
+     [("Medallon de carne 150g", 1), ("Pan brioche", 1), ("Tomate", 2), ("Queso cheddar", 1),
+      ("Aros de cebolla", 2), ("Ketchup", 15), ("Mayonesa", 15)]),
+    ("Hamburguesa Doble Completa",
+     "Pan brioche, Queso cheddar, Aros de cebolla, Panceta, Tomate, Hoja de lechuga, Ketchup, Mayonesa, Huevo, Medallon de carne 150g",
+     "Hamburguesas", False, f"{_IMG}/v1780892598/foodstore/productos/nnvz8pkmfnwqmmdpwatg.png",
+     [("Medallon de carne 150g", 2), ("Pan brioche", 1), ("Hoja de lechuga", 1), ("Tomate", 2),
+      ("Queso cheddar", 2), ("Aros de cebolla", 3), ("Panceta", 50), ("Ketchup", 20),
+      ("Mayonesa", 20), ("Huevo", 1)]),
+    ("Hamburguesa BBQ",
+     "Tomate, Medallon de carne 150g, Aros de cebolla, Salsa BBQ, Panceta, Queso cheddar, Pan brioche",
+     "Hamburguesas", False, f"{_IMG}/v1780892493/foodstore/productos/skgplk54oqy5wknprzm5.png",
+     [("Medallon de carne 150g", 1), ("Pan brioche", 1), ("Tomate", 2), ("Queso cheddar", 1),
+      ("Aros de cebolla", 2), ("Panceta", 40), ("Salsa BBQ", 15)]),
+    ("Coca-Cola", "Botella de Coca Cola",
+     "Refrescos", False, f"{_IMG}/v1780892224/foodstore/productos/kcjrltvyfi9lnojutjci.png",
+     [("Botella de Coca Cola", 1)]),
+    ("Agua Mineral", "Botella de Agua Mineral",
+     "Refrescos", True, f"{_IMG}/v1780871209/foodstore/productos/i7ijixu9qnnhfqsdmfva.jpg",
+     [("Botella de Agua Mineral", 1)]),
+    ("Jugo de Naranja", "Naranja",
+     "Jugos", True, f"{_IMG}/v1780891578/foodstore/productos/ofqjkakr1rqna7rxmlls.jpg",
+     [("Naranja", 2)]),
+    ("Brownie con helado",
+     "Crema de leche, Chocolate, Huevo, Azucar, Helado de vainilla, Harina de trigo",
+     "Postres", False, f"{_IMG}/v1780892135/foodstore/productos/twzk3vsk12bvyqzjfn92.png",
+     [("Chocolate", 90), ("Harina de trigo", 50), ("Huevo", 2), ("Azucar", 60),
+      ("Helado de vainilla", 130), ("Crema de leche", 50)]),
+    ("Combo Clasico",
+     "Ketchup, Medallon de carne 150g, Pan brioche, Tomate, Queso cheddar, Mayonesa, Aros de cebolla",
+     "Combos", False, f"{_IMG}/v1780892752/foodstore/productos/aauvwbpccxokld7blpsh.png",
+     [("Medallon de carne 150g", 1), ("Pan brioche", 1), ("Tomate", 1), ("Queso cheddar", 1),
+      ("Aros de cebolla", 2), ("Ketchup", 15), ("Mayonesa", 15)]),
+    ("Empanada de Carne",
+     "Huevo, Tapa de empanada, Carne Picada, Cebolla, Aceitunas",
+     "Empanadas", False, f"{_IMG}/v1780891886/foodstore/productos/cwkbd3njx8yy5nm5g9n8.png",
+     [("Huevo", 1), ("Tapa de empanada", 1), ("Carne Picada", 70), ("Cebolla", 1), ("Aceitunas", 2)]),
+    ("Sandwich de Jamón y Queso",
+     "Pan de Miga, Jamón cocido, Queso Barra, Mayonesa",
+     "Sandwich", True, f"{_IMG}/v1780892010/foodstore/productos/coehkvccfouxqu4jpd5l.webp",
+     [("Mayonesa", 15), ("Pan de Miga", 2), ("Jamón cocido", 50), ("Queso Barra", 50)]),
+]
+
+# Insumos que el cliente puede quitar de un producto (personalización del pedido).
+_REMOVIBLES = {"Tomate", "Hoja de lechuga", "Queso cheddar", "Aros de cebolla", "Ketchup", "Mayonesa", "Panceta"}
+
+_MARGEN = Decimal("0.30")
+
+
+def _seed_catalogo(session: Session):
     """
-    Catálogo de ejemplo para que la tienda no quede vacía en una DB nueva.
-    Idempotente: si ya hay algún producto, no hace nada.
-    El stock es por INSUMO; los productos descuentan stock de sus ingredientes.
+    Catálogo completo de la tienda (categorías jerárquicas, insumos con stock y
+    productos con receta). Idempotente: si ya hay productos cargados, no hace nada.
+    El stock es por INSUMO; el stock de cada producto se deriva de sus insumos.
+    El precio se calcula: costo total de insumos × (1 + margen).
     """
     if session.exec(select(Producto)).first():
         return  # ya hay productos cargados
 
-    # ── Categorías ────────────────────────────────────────────────────────────
+    # Categorías (padres primero para resolver parent_id)
     cats: dict[str, Categoria] = {}
-    for nombre, desc in [
-        ("Hamburguesas", "Nuestras burgers a la parrilla"),
-        ("Pizzas",       "Pizzas a la piedra"),
-        ("Bebidas",      "Bebidas frías"),
-        ("Postres",      "Para cerrar la comida"),
-    ]:
-        c = Categoria(nombre=nombre, descripcion=desc)
+    for nombre, desc, padre in _CATEGORIAS:
+        c = Categoria(nombre=nombre, descripcion=desc,
+                      parent_id=cats[padre].id if padre else None)
         session.add(c)
+        session.flush()
         cats[nombre] = c
-    session.flush()
 
-    # ── Insumos (Ingredientes con stock) ──────────────────────────────────────
-    # nombre, unidad_medida, costo_unitario, stock, es_alergeno, es_producto_terminado
-    insumo_defs = [
-        ("Pan de hamburguesa", "unidad", "80",   "1000", True,  False),
-        ("Medallón de carne",  "unidad", "250",  "1000", False, False),
-        ("Queso cheddar",      "feta",   "60",   "1000", True,  False),
-        ("Lechuga",            "gramo",  "2",     "5000", False, False),
-        ("Tomate",             "gramo",  "1.5",   "5000", False, False),
-        ("Masa de pizza",      "unidad", "150",   "500",  True,  False),
-        ("Salsa de tomate",    "ml",     "0.5",  "10000", False, False),
-        ("Mozzarella",         "gramo",  "4",     "8000", True,  False),
-        ("Gaseosa lata 354ml", "unidad", "300",   "500",  False, True),
-        ("Helado (pote)",      "gramo",  "5",     "4000", True,  False),
-    ]
+    # Insumos
     insumos: dict[str, Ingrediente] = {}
-    for nombre, unidad, costo, stock, alergeno, terminado in insumo_defs:
+    for nombre, unidad, alergeno, costo, stock, terminado, desc in _INSUMOS:
         ing = Ingrediente(
             nombre=nombre,
+            descripcion=desc,
             unidad_medida=unidad,
             costo_unitario=Decimal(costo),
             stock_cantidad=Decimal(stock),
@@ -180,26 +254,24 @@ def _seed_catalogo_demo(session: Session):
 
     ud = session.exec(select(UnidadMedida).where(UnidadMedida.simbolo == "ud")).first()
     unidad_venta_id = ud.id if ud else None
-    margen = Decimal("0.30")
-    _REMOVIBLES = {"Lechuga", "Tomate", "Queso cheddar"}
 
-    def crear_producto(nombre, descripcion, categoria, imagen, receta):
-        """receta: lista de (nombre_insumo, cantidad)."""
+    # Productos
+    for nombre, desc, categoria, destacado, imagen, receta in _PRODUCTOS:
         costo = sum(insumos[n].costo_unitario * Decimal(str(c)) for n, c in receta)
-        precio = (costo * (Decimal("1") + margen)).quantize(Decimal("0.01"))
+        precio = (costo * (Decimal("1") + _MARGEN)).quantize(Decimal("0.01"))
         p = Producto(
             nombre=nombre,
-            descripcion=descripcion,
+            descripcion=desc,
             imagenes_url=[imagen],
             precio_base=precio,
-            margen_ganancia=margen,
-            stock_cantidad=100,
+            margen_ganancia=_MARGEN,
             disponible=True,
+            destacado=destacado,
             unidad_venta_id=unidad_venta_id,
         )
         session.add(p)
         session.flush()
-        session.add(ProductoCategoria(producto_id=p.id, categoria_id=categoria.id, es_principal=True))
+        session.add(ProductoCategoria(producto_id=p.id, categoria_id=cats[categoria].id, es_principal=True))
         for n, c in receta:
             session.add(ProductoIngrediente(
                 producto_id=p.id,
@@ -208,35 +280,8 @@ def _seed_catalogo_demo(session: Session):
                 es_removible=(n in _REMOVIBLES),
             ))
 
-    crear_producto(
-        "Hamburguesa Clásica", "Carne, cheddar, lechuga y tomate en pan artesanal.",
-        cats["Hamburguesas"], "https://placehold.co/600x400?text=Hamburguesa+Clasica",
-        [("Pan de hamburguesa", 1), ("Medallón de carne", 1), ("Queso cheddar", 1),
-         ("Lechuga", 20), ("Tomate", 30)],
-    )
-    crear_producto(
-        "Doble Cheese", "Doble medallón de carne y doble cheddar.",
-        cats["Hamburguesas"], "https://placehold.co/600x400?text=Doble+Cheese",
-        [("Pan de hamburguesa", 1), ("Medallón de carne", 2), ("Queso cheddar", 2)],
-    )
-    crear_producto(
-        "Pizza Muzzarella", "Mozzarella y salsa de tomate a la piedra.",
-        cats["Pizzas"], "https://placehold.co/600x400?text=Pizza+Muzzarella",
-        [("Masa de pizza", 1), ("Salsa de tomate", 150), ("Mozzarella", 250)],
-    )
-    crear_producto(
-        "Gaseosa en lata", "Bebida fría 354 ml.",
-        cats["Bebidas"], "https://placehold.co/600x400?text=Gaseosa",
-        [("Gaseosa lata 354ml", 1)],
-    )
-    crear_producto(
-        "Helado 1/4 kg", "Helado artesanal, sabores a elección.",
-        cats["Postres"], "https://placehold.co/600x400?text=Helado",
-        [("Helado (pote)", 250)],
-    )
-
     session.commit()
-    print("Seed de catálogo demo completado (5 productos).")
+    print(f"Seed de catálogo completado ({len(_PRODUCTOS)} productos, {len(_INSUMOS)} insumos).")
 
 
 if __name__ == "__main__":
