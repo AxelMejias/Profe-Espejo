@@ -56,6 +56,7 @@ _TRANSICIONES_CLIENT: dict[str, Set[str]] = {
 _COSTO_ENVIO_DEFAULT    = Decimal("50.00")
 _ESTADO_PENDIENTE       = "PENDIENTE"
 _ESTADO_CONFIRMADO      = "CONFIRMADO"
+_ESTADO_EN_PREP         = "EN_PREP"
 _ESTADO_CANCELADO       = "CANCELADO"
 _FORMA_PAGO_MP          = "MERCADOPAGO"
 
@@ -281,14 +282,11 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
                 status.HTTP_409_CONFLICT,
             )
 
-    # 5. Decrementar stock de insumos
-    for ing_id, cantidad_req in requerido.items():
-        ing = uow.ingredientes.get_by_id(ing_id)
-        ing.stock_cantidad -= cantidad_req
-        ing.updated_at = datetime.utcnow()
-        uow.ingredientes.add(ing)
+    # NOTA: el stock NO se descuenta al crear el pedido. El inventario se consume
+    # recién cuando el pedido se CONFIRMA (pago aprobado o confirmación del staff),
+    # vía _descontar_stock_pedido. Acá solo se valida que haya stock disponible.
 
-    # 6. Calcular totales y persistir Pedido
+    # Calcular totales y persistir Pedido
     descuento = Decimal("0.00")
     costo_envio = _COSTO_ENVIO_DEFAULT if data.direccion_id is not None else Decimal("0.00")
     total = subtotal - descuento + costo_envio
@@ -336,14 +334,11 @@ def crear_pedido(uow, data: PedidoCreate, usuario_id: int) -> PedidoResponse:
 # Restaurar stock al cancelar
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _restaurar_stock_pedido(uow, pedido: Pedido) -> None:
-    """
-    Incrementa el stock de cada insumo según lo consumido al crear el pedido.
-    Usa los ingrediente_links actuales del producto × la cantidad del detalle.
-    """
+def _insumos_requeridos_pedido(uow, pedido: Pedido) -> dict[int, Decimal]:
+    """Insumos (ingrediente_id → cantidad total) que consume el pedido, según sus
+    detalles y las recetas actuales de los productos."""
     detalles = uow.pedidos.get_detalles(pedido.id)
     acumulado: dict[int, Decimal] = {}
-
     for detalle in detalles:
         links = uow.productos.get_ingrediente_links(detalle.producto_id)
         for link in links:
@@ -351,12 +346,50 @@ def _restaurar_stock_pedido(uow, pedido: Pedido) -> None:
             acumulado[link.ingrediente_id] = (
                 acumulado.get(link.ingrediente_id, Decimal("0")) + cantidad
             )
+    return acumulado
 
-    for ing_id, cantidad in acumulado.items():
+
+def _restaurar_stock_pedido(uow, pedido: Pedido) -> None:
+    """Devuelve al stock los insumos que el pedido había descontado (al cancelar)."""
+    for ing_id, cantidad in _insumos_requeridos_pedido(uow, pedido).items():
         ing = uow.ingredientes.get_by_id(ing_id)
         if not ing:
             continue
         ing.stock_cantidad += cantidad
+        ing.updated_at = datetime.utcnow()
+        uow.ingredientes.add(ing)
+
+
+def _descontar_stock_pedido(uow, pedido: Pedido, validar: bool = True) -> None:
+    """
+    Descuenta del stock los insumos del pedido. Se llama al CONFIRMAR el pedido
+    (pago aprobado / confirmación manual del staff), NO al crearlo: el inventario
+    se consume cuando el pedido se paga, no cuando se crea en PENDIENTE.
+
+    - validar=True (confirmación manual del staff): re-valida que haya stock y
+      rechaza con 409 si no alcanza (el stock pudo cambiar desde la creación).
+    - validar=False (pago MP ya aprobado): descuenta best-effort sin bloquear
+      (el cobro ya se hizo) y nunca deja stock negativo.
+    """
+    requerido = _insumos_requeridos_pedido(uow, pedido)
+    if validar:
+        for ing_id, cantidad in requerido.items():
+            ing = uow.ingredientes.get_by_id(ing_id)
+            if not ing:
+                _problem("PRODUCTO_NO_DISPONIBLE",
+                         "Uno o más productos del pedido ya no están disponibles.",
+                         status.HTTP_409_CONFLICT)
+            if ing.stock_cantidad < cantidad:
+                _problem("STOCK_INSUFICIENTE",
+                         f"Stock insuficiente para insumo '{ing.nombre}': "
+                         f"disponible {ing.stock_cantidad}, requerido {cantidad}",
+                         status.HTTP_409_CONFLICT)
+    for ing_id, cantidad in requerido.items():
+        ing = uow.ingredientes.get_by_id(ing_id)
+        if not ing:
+            continue
+        nuevo = ing.stock_cantidad - cantidad
+        ing.stock_cantidad = nuevo if validar else max(Decimal("0"), nuevo)
         ing.updated_at = datetime.utcnow()
         uow.ingredientes.add(ing)
 
@@ -405,8 +438,21 @@ def avanzar_estado(
             status.HTTP_403_FORBIDDEN,
         )
 
-    if estado_hacia == _ESTADO_CANCELADO and restaurar_stock:
-        _restaurar_stock_pedido(uow, pedido)
+    # Descontar stock al CONFIRMAR (no en la creación): el inventario se consume
+    # cuando el pedido se paga/confirma. Re-valida que haya stock suficiente.
+    if estado_hacia == _ESTADO_CONFIRMADO:
+        _descontar_stock_pedido(uow, pedido, validar=True)
+
+    # Restaurar stock al CANCELAR, según el estado del que viene:
+    #  - PENDIENTE: nunca se descontó stock → no se restaura nada.
+    #  - CONFIRMADO: reservado pero no preparado → se restaura siempre.
+    #  - EN_PREP: los insumos pudieron consumirse en la cocina → lo decide el staff.
+    if estado_hacia == _ESTADO_CANCELADO:
+        if pedido.estado_codigo == _ESTADO_EN_PREP:
+            if restaurar_stock:
+                _restaurar_stock_pedido(uow, pedido)
+        elif pedido.estado_codigo == _ESTADO_CONFIRMADO:
+            _restaurar_stock_pedido(uow, pedido)
 
     estado_desde          = pedido.estado_codigo
     pedido.estado_codigo  = estado_hacia
@@ -453,7 +499,11 @@ def cancelar_pedido_cliente(
                  "El motivo es obligatorio para cancelar un pedido",
                  status.HTTP_400_BAD_REQUEST)
 
-    if restaurar_stock:
+    # Restaurar stock solo si el pedido ya lo había descontado (estaba CONFIRMADO).
+    # En PENDIENTE el stock nunca se descontó → no hay nada que restaurar. El cliente
+    # NO decide esto (el parámetro restaurar_stock no aplica acá), lo que evita el
+    # exploit de crear/cancelar pedidos sin pagar para vaciar el inventario.
+    if pedido.estado_codigo == _ESTADO_CONFIRMADO:
         _restaurar_stock_pedido(uow, pedido)
 
     estado_desde         = pedido.estado_codigo
@@ -538,6 +588,10 @@ def confirmar_pago_mp(uow, pedido_id: int) -> PedidoResponse:
         _marcar_pago_approved(uow, pedido_id)
         return _build_response(uow, pedido)
 
+    # Pago MP aprobado → descontar stock (best-effort: el cobro ya se hizo,
+    # no bloqueamos la confirmación; nunca se deja stock negativo).
+    _descontar_stock_pedido(uow, pedido, validar=False)
+
     estado_desde         = pedido.estado_codigo
     pedido.estado_codigo = _ESTADO_CONFIRMADO
     pedido.updated_at    = datetime.utcnow()
@@ -575,7 +629,8 @@ def cancelar_pago_mp(uow, pedido_id: int) -> None:
     ):
         return
 
-    _restaurar_stock_pedido(uow, pedido)
+    # El pedido estaba en PENDIENTE → nunca se descontó stock (se descuenta al
+    # confirmar), así que no hay nada que restaurar al rechazarse el pago.
 
     estado_desde         = pedido.estado_codigo
     pedido.estado_codigo = _ESTADO_CANCELADO

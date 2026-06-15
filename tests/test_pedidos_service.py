@@ -73,6 +73,59 @@ class TestAvanzarEstado:
         service.avanzar_estado(uow, 1, "CANCELADO", "Motivo", 99, ["ADMIN"])
         assert pedido.estado_codigo == "CANCELADO"
 
+    # ── Stock: se descuenta al CONFIRMAR, no al crear ─────────────────────────
+
+    def _setup_insumos(self, uow, stock="10", cant_detalle=3, cant_link="1"):
+        detalle = MagicMock()
+        detalle.producto_id = 1
+        detalle.cantidad = cant_detalle
+        detalle.nombre_snapshot = "Producto Test"
+        detalle.precio_snapshot = Decimal("100.00")
+        detalle.subtotal_snap = Decimal("300.00")
+        detalle.personalizacion = None
+        uow.pedidos.get_detalles.return_value = [detalle]
+        link = MagicMock()
+        link.ingrediente_id = 99
+        link.cantidad = Decimal(cant_link)
+        uow.productos.get_ingrediente_links.return_value = [link]
+        ing = MagicMock()
+        ing.stock_cantidad = Decimal(stock)
+        uow.ingredientes.get_by_id.return_value = ing
+        return ing
+
+    def test_descuenta_stock_al_confirmar(self):
+        """PENDIENTE → CONFIRMADO descuenta el stock de insumos."""
+        uow, pedido = _uow_con_pedido("PENDIENTE")
+        ing = self._setup_insumos(uow, stock="10", cant_detalle=3, cant_link="1")
+        service.avanzar_estado(uow, 1, "CONFIRMADO", None, 99, ["ADMIN"])
+        assert pedido.estado_codigo == "CONFIRMADO"
+        assert ing.stock_cantidad == Decimal("7")  # 10 - (1 × 3)
+
+    def test_confirmar_sin_stock_lanza_409(self):
+        """Al confirmar se re-valida el stock; si no alcanza, 409."""
+        uow, _ = _uow_con_pedido("PENDIENTE")
+        self._setup_insumos(uow, stock="2", cant_detalle=3, cant_link="1")  # falta stock
+        with pytest.raises(HTTPException) as exc:
+            service.avanzar_estado(uow, 1, "CONFIRMADO", None, 99, ["ADMIN"])
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "STOCK_INSUFICIENTE"
+
+    def test_cancelar_desde_pendiente_no_restaura_stock(self):
+        """En PENDIENTE el stock nunca se descontó → cancelar no lo restaura."""
+        uow, pedido = _uow_con_pedido("PENDIENTE")
+        ing = self._setup_insumos(uow, stock="10")
+        service.avanzar_estado(uow, 1, "CANCELADO", "Motivo", 99, ["ADMIN"])
+        assert pedido.estado_codigo == "CANCELADO"
+        assert ing.stock_cantidad == Decimal("10")  # sin cambios
+
+    def test_cancelar_desde_confirmado_restaura_stock(self):
+        """En CONFIRMADO el stock estaba descontado → cancelar lo restaura."""
+        uow, pedido = _uow_con_pedido("CONFIRMADO")
+        ing = self._setup_insumos(uow, stock="7")
+        service.avanzar_estado(uow, 1, "CANCELADO", "Motivo", 99, ["ADMIN"])
+        assert pedido.estado_codigo == "CANCELADO"
+        assert ing.stock_cantidad == Decimal("10")  # 7 + (1 × 3) restaurado
+
     # ── Registro en historial ─────────────────────────────────────────────────
 
     def test_guarda_estado_desde_en_historial(self):
@@ -308,8 +361,9 @@ class TestCrearPedido:
         uow.pedidos.add.assert_called_once()
         uow.pedidos.add_historial.assert_called_once()
 
-    def test_descuenta_stock(self):
-        """El stock del insumo se reduce según los links producto→insumo."""
+    def test_no_descuenta_stock_al_crear(self):
+        """El stock NO se descuenta al crear el pedido (se descuenta al CONFIRMAR).
+        Acá solo se valida que haya stock disponible."""
         uow, _, _ = self._setup_uow_crear(stock=10)
         uow.pedidos.add.side_effect = self._set_pedido_id
 
@@ -317,7 +371,7 @@ class TestCrearPedido:
         ing.stock_cantidad = Decimal("10")
         link = MagicMock()
         link.ingrediente_id = 99
-        link.cantidad = Decimal("1")  # 1 unidad de insumo por unidad de producto
+        link.cantidad = Decimal("1")
         uow.productos.get_ingrediente_links.return_value = [link]
         uow.ingredientes.get_by_id.return_value = ing
 
@@ -327,7 +381,7 @@ class TestCrearPedido:
         )
         service.crear_pedido(uow, data, usuario_id=1)
 
-        assert ing.stock_cantidad == Decimal("7")  # 10 - (1 × 3)
+        assert ing.stock_cantidad == Decimal("10")  # sin cambios: no se descuenta al crear
 
     def test_primer_historial_estado_desde_null(self):
         """RN-02: el primer historial tiene estado_desde=None."""
