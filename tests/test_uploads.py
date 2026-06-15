@@ -23,3 +23,14 @@ def test_upload_tipo_invalido_rechazado(client, admin_headers):
 def test_delete_imagen_requiere_admin(client, client_headers):
     r = client.delete("/api/v1/uploads/imagen/foo", headers=client_headers)
     assert r.status_code == 403
+
+
+def test_delete_imagen_sin_auth_401(client):
+    r = client.delete("/api/v1/uploads/imagen/foo")
+    assert r.status_code == 401
+
+
+def test_upload_sin_archivo_422(client, admin_headers):
+    # Falta el campo requerido `archivo` (UploadFile) → 422 antes de tocar Cloudinary.
+    r = client.post("/api/v1/uploads/imagen", headers=admin_headers)
+    assert r.status_code == 422, r.text
