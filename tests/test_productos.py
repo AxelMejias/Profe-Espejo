@@ -1,4 +1,46 @@
-"""Tests de integración del módulo Productos (doc §5.2/§13) — lectura, stock y RBAC."""
+"""Tests del módulo Productos (doc §5.2/§13) — lectura pública, stock derivado y RBAC."""
+
+from datetime import datetime
+from decimal import Decimal
+
+from app.modules.productos.schemas import ProductoRead, InsumoEnProductoRead
+
+
+def _insumo(cantidad, stock_actual):
+    return InsumoEnProductoRead(
+        ingrediente_id=1, nombre="Insumo", cantidad=Decimal(str(cantidad)),
+        unidad_medida="UNIDAD", costo_unitario=Decimal("1.00"),
+        subtotal=Decimal("1.00"), stock_actual=Decimal(str(stock_actual)),
+        es_producto_terminado=False,
+    )
+
+
+def _producto_read(insumos):
+    return ProductoRead(
+        id=1, nombre="Burger", descripcion=None, imagenes_url=[],
+        precio_base=Decimal("1000.00"), margen_ganancia=Decimal("0.30"),
+        costo_total_insumos=Decimal("0.00"), disponible=True,
+        categorias=[], insumos=insumos, created_at=datetime.utcnow(),
+    )
+
+
+def test_stock_disponible_es_el_minimo_producible():
+    # Insumo A: 10 / 2 = 5 ; Insumo B: 9 / 3 = 3  → mínimo producible = 3
+    p = _producto_read([_insumo(cantidad=2, stock_actual=10),
+                        _insumo(cantidad=3, stock_actual=9)])
+    assert p.model_dump()["stock_disponible"] == 3
+
+
+def test_stock_disponible_cero_si_un_insumo_se_agota():
+    # Si un insumo de la receta está en 0, el producto no se puede producir.
+    p = _producto_read([_insumo(cantidad=2, stock_actual=10),
+                        _insumo(cantidad=1, stock_actual=0)])
+    assert p.model_dump()["stock_disponible"] == 0
+
+
+def test_stock_disponible_none_sin_receta():
+    p = _producto_read([])
+    assert p.model_dump()["stock_disponible"] is None
 
 
 def test_listar_productos_publico_sin_auth(client):
@@ -17,26 +59,13 @@ def test_obtener_producto_publico_sin_auth(client, producto_factory):
     assert body["stock_cantidad"] == 33
 
 
-def test_actualizar_stock_rol_stock(client, stock_headers, producto_factory):
-    prod = producto_factory(nombre="Burger Stock A", stock_cantidad=10)
+def test_stock_no_es_editable_endpoint_eliminado(client, stock_headers, producto_factory):
+    # El stock del producto se deriva de los insumos: el endpoint de edición
+    # manual fue eliminado (ya no existe PATCH /productos/{id}/stock).
+    prod = producto_factory(nombre="Burger Stock A")
     r = client.patch(f"/api/v1/productos/{prod.id}/stock", headers=stock_headers,
                      json={"stock_cantidad": 99})
-    assert r.status_code == 200, r.text
-    assert r.json()["stock_cantidad"] == 99
-
-
-def test_actualizar_stock_cliente_403(client, client_headers, producto_factory):
-    prod = producto_factory(nombre="Burger Stock B")
-    r = client.patch(f"/api/v1/productos/{prod.id}/stock", headers=client_headers,
-                     json={"stock_cantidad": 5})
-    assert r.status_code == 403
-
-
-def test_actualizar_stock_negativo_rechazado(client, stock_headers, producto_factory):
-    prod = producto_factory(nombre="Burger Stock C")
-    r = client.patch(f"/api/v1/productos/{prod.id}/stock", headers=stock_headers,
-                     json={"stock_cantidad": -5})
-    assert r.status_code == 422  # Field(ge=0) en StockUpdate
+    assert r.status_code == 404  # la ruta /{id}/stock ya no existe
 
 
 def test_listar_categorias_publico_sin_auth(client):

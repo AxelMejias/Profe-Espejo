@@ -250,19 +250,6 @@ def toggle_disponibilidad(uow, producto_id: int, disponible: bool) -> ProductoRe
     return _build_response(uow, producto)
 
 
-def set_stock(uow, producto_id: int, stock_cantidad: int) -> ProductoRead:
-    """Actualiza el stock numérico del producto (rol STOCK, doc §4.2)."""
-    producto = uow.productos.get_by_id(producto_id)
-    if not producto:
-        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
-    if stock_cantidad < 0:
-        _problem("STOCK_NEGATIVO", "El stock no puede ser negativo", status.HTTP_400_BAD_REQUEST)
-    producto.stock_cantidad = stock_cantidad
-    producto.updated_at = datetime.utcnow()
-    uow.productos.add(producto)
-    return _build_response(uow, producto)
-
-
 def delete(uow, producto_id: int) -> None:
     producto = uow.productos.get_by_id(producto_id)
     if not producto:

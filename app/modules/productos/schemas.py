@@ -50,11 +50,6 @@ class ProductoUpdate(BaseModel):
     insumos: Optional[List[InsumoEnProductoCreate]] = None
 
 
-class StockUpdate(BaseModel):
-    """Actualización de stock por rol STOCK (doc §4.2)."""
-    stock_cantidad: int = Field(ge=0)
-
-
 class CategoriaSimple(BaseModel):
     id: int
     nombre: str
@@ -87,6 +82,18 @@ class ProductoRead(BaseModel):
     @property
     def image_url(self) -> Optional[str]:
         return self.imagenes_url[0] if self.imagenes_url else None
+
+    @computed_field
+    @property
+    def stock_disponible(self) -> Optional[int]:
+        """Stock REAL del producto: cuántas unidades se pueden producir con el
+        stock actual de los insumos = min(floor(stock_actual / cantidad_receta)).
+        None si el producto no tiene receta. Sustituye al stock manual: el stock
+        del producto se deriva de sus insumos, no se edita a mano."""
+        cantidades = [ins for ins in self.insumos if ins.cantidad > 0]
+        if not cantidades:
+            return None
+        return min(int(ins.stock_actual // ins.cantidad) for ins in cantidades)
 
 
 class PaginatedProductos(BaseModel):
