@@ -14,6 +14,7 @@ from app.modules.productos.model import Producto
 from app.modules.productos.schemas import (
     ProductoCreate, ProductoUpdate, ProductoRead,
     PaginatedProductos, CategoriaSimple, InsumoEnProductoRead,
+    AsociarIngredienteRequest, ProductoIngredienteRead,
 )
 
 
@@ -81,6 +82,20 @@ def _calcular_precio(insumos: list[Ingrediente], cantidades: dict[int, Decimal],
     """precio = sum(costo_unitario * cantidad) * (1 + margen)"""
     costo = sum(ing.costo_unitario * cantidades[ing.id] for ing in insumos)
     return (costo * (1 + margen)).quantize(Decimal("0.01"))
+
+
+def _resolver_unidad_id(uow, unidad_texto: str) -> int:
+    """Resuelve la unidad de medida de la receta (NN) a partir de la unidad del
+    insumo (texto libre). Matchea por símbolo o nombre; si no, cae a 'ud'."""
+    t = (unidad_texto or "").strip().lower()
+    unidades = uow.unidades.get_all()
+    for u in unidades:
+        if u.simbolo.lower() == t or u.nombre.lower() == t:
+            return u.id
+    fallback = uow.unidades.get_by_simbolo("ud") or (unidades[0] if unidades else None)
+    if not fallback:
+        _problem("UNIDAD_NOT_FOUND", "No hay unidades de medida cargadas (correr el seed)", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return fallback.id
 
 
 #CRUD
@@ -179,6 +194,7 @@ def create(uow, data: ProductoCreate) -> ProductoRead:
             producto_id=producto.id,
             ingrediente_id=ing.id,
             cantidad=float(cantidades[ing.id]),
+            unidad_medida_id=_resolver_unidad_id(uow, ing.unidad_medida),
         )
 
     if data.categoria_ids:
@@ -220,6 +236,7 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
                 producto_id=producto_id,
                 ingrediente_id=ing.id,
                 cantidad=float(item.cantidad),
+                unidad_medida_id=_resolver_unidad_id(uow, ing.unidad_medida),
             )
         producto.margen_ganancia = margen
         producto.precio_base = _calcular_precio(insumos_orm, cantidades, margen)
@@ -248,6 +265,85 @@ def toggle_disponibilidad(uow, producto_id: int, disponible: bool) -> ProductoRe
     producto.updated_at = datetime.utcnow()
     uow.productos.add(producto)
     return _build_response(uow, producto)
+
+
+def set_imagenes(uow, producto_id: int, imagenes_url: list[str]) -> ProductoRead:
+    """Reemplaza la lista de imágenes del producto (doc §5.2 PATCH /imagenes)."""
+    producto = uow.productos.get_by_id(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+    producto.imagenes_url = imagenes_url
+    producto.updated_at = datetime.utcnow()
+    uow.productos.add(producto)
+    return _build_response(uow, producto)
+
+
+def listar_ingredientes(uow, producto_id: int) -> list[InsumoEnProductoRead]:
+    """Lista los insumos asociados a un producto (doc §5.2 GET /ingredientes)."""
+    producto = uow.productos.get_by_id(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+    insumos = []
+    for link in uow.productos.get_ingrediente_links(producto_id):
+        ing = uow.ingredientes.get_by_id(link.ingrediente_id)
+        if not ing:
+            continue
+        cantidad = Decimal(str(link.cantidad))
+        insumos.append(InsumoEnProductoRead(
+            ingrediente_id=ing.id,
+            nombre=ing.nombre,
+            cantidad=cantidad,
+            unidad_medida=ing.unidad_medida,
+            costo_unitario=ing.costo_unitario,
+            subtotal=cantidad * ing.costo_unitario,
+            stock_actual=ing.stock_cantidad,
+            es_producto_terminado=ing.es_producto_terminado,
+        ))
+    return insumos
+
+
+def agregar_ingrediente(uow, producto_id: int, data: AsociarIngredienteRequest) -> ProductoIngredienteRead:
+    """Asocia un insumo a un producto con cantidad y unidad; recalcula el precio
+    (doc §5.2 POST /ingredientes)."""
+    producto = uow.productos.get_by_id(producto_id)
+    if not producto:
+        _problem("PRODUCTO_NOT_FOUND", f"Producto {producto_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    ing = uow.ingredientes.get_by_id(data.ingrediente_id)
+    if not ing:
+        _problem("INSUMO_NOT_FOUND", f"Insumo {data.ingrediente_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    if any(l.ingrediente_id == data.ingrediente_id for l in uow.productos.get_ingrediente_links(producto_id)):
+        _problem("INSUMO_DUPLICADO", f"El insumo {data.ingrediente_id} ya está asociado al producto", status.HTTP_409_CONFLICT)
+
+    if data.unidad_medida_id is not None and not uow.unidades.get_by_id(data.unidad_medida_id):
+        _problem("UNIDAD_NOT_FOUND", f"Unidad de medida {data.unidad_medida_id} no encontrada", status.HTTP_404_NOT_FOUND)
+    unidad_id = data.unidad_medida_id or _resolver_unidad_id(uow, ing.unidad_medida)
+
+    uow.productos.add_ingrediente_link(
+        producto_id=producto_id,
+        ingrediente_id=ing.id,
+        cantidad=float(data.cantidad),
+        unidad_medida_id=unidad_id,
+        es_removible=data.es_removible,
+    )
+
+    # Recalcular el precio con el insumo nuevo incluido.
+    links = uow.productos.get_ingrediente_links(producto_id)
+    cantidades = {l.ingrediente_id: Decimal(str(l.cantidad)) for l in links}
+    insumos_orm = [uow.ingredientes.get_by_id(iid) for iid in cantidades]
+    producto.precio_base = _calcular_precio(insumos_orm, cantidades, producto.margen_ganancia)
+    producto.updated_at = datetime.utcnow()
+    uow.productos.add(producto)
+
+    return ProductoIngredienteRead(
+        producto_id=producto_id,
+        ingrediente_id=ing.id,
+        nombre=ing.nombre,
+        cantidad=Decimal(str(data.cantidad)),
+        unidad_medida_id=unidad_id,
+        es_removible=data.es_removible,
+    )
 
 
 def delete(uow, producto_id: int) -> None:

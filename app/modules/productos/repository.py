@@ -87,12 +87,21 @@ class ProductoRepository(BaseRepository[Producto]):
         self.session.add(ProductoCategoria(producto_id=producto_id, categoria_id=categoria_id))
         self.session.flush()
 
-    def add_ingrediente_link(self, producto_id: int, ingrediente_id: int, cantidad: float) -> None:
+    def add_ingrediente_link(
+        self,
+        producto_id: int,
+        ingrediente_id: int,
+        cantidad: float,
+        unidad_medida_id: int,
+        es_removible: bool = False,
+    ) -> None:
         self.session.add(
             ProductoIngrediente(
                 producto_id=producto_id,
                 ingrediente_id=ingrediente_id,
                 cantidad=cantidad,
+                unidad_medida_id=unidad_medida_id,
+                es_removible=es_removible,
             )
         )
         self.session.flush()

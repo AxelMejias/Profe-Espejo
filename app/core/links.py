@@ -34,6 +34,6 @@ class ProductoIngrediente(SQLModel, table=True):
         description="Cantidad del ingrediente en el producto",
     )
     es_removible: bool = Field(default=False, description="Si el cliente puede excluirlo")
-    unidad_medida_id: Optional[int] = Field(
-        default=None, foreign_key="unidad_medida.id", description="Unidad de medida de la cantidad"
+    unidad_medida_id: int = Field(
+        foreign_key="unidad_medida.id", nullable=False, description="Unidad de medida de la cantidad (doc v7, NN)"
     )

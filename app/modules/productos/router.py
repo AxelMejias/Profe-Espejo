@@ -8,6 +8,8 @@ import openpyxl
 
 from app.modules.productos.schemas import (
     ProductoCreate, ProductoUpdate, ProductoRead, PaginatedProductos,
+    ImagenProductoUpdate, AsociarIngredienteRequest, ProductoIngredienteRead,
+    InsumoEnProductoRead,
 )
 from app.modules.productos import service
 from app.core.dependencies import require_role
@@ -175,6 +177,7 @@ def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
                             producto_id=producto.id,
                             ingrediente_id=ing.id,
                             cantidad=float(cantidades[ing.id]),
+                            unidad_medida_id=service._resolver_unidad_id(uow, ing.unidad_medida),
                         )
 
                     if cats_raw:
@@ -263,6 +266,33 @@ def toggle_disponibilidad(
 ):
     with UnitOfWork() as uow:
         return service.toggle_disponibilidad(uow, producto_id, disponible)
+
+
+@router.patch("/{producto_id}/imagenes", response_model=ProductoRead, summary="Actualizar lista de imágenes del producto")
+def actualizar_imagenes(
+    producto_id: Annotated[int, Path(ge=1)],
+    data: ImagenProductoUpdate,
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.set_imagenes(uow, producto_id, data.imagenes_url)
+
+
+@router.get("/{producto_id}/ingredientes", response_model=list[InsumoEnProductoRead], summary="Listar insumos del producto")
+def listar_ingredientes_producto(producto_id: Annotated[int, Path(ge=1)]):
+    with UnitOfWork() as uow:
+        return service.listar_ingredientes(uow, producto_id)
+
+
+@router.post("/{producto_id}/ingredientes", response_model=ProductoIngredienteRead,
+             status_code=status.HTTP_201_CREATED, summary="Asociar insumo al producto")
+def asociar_ingrediente(
+    producto_id: Annotated[int, Path(ge=1)],
+    data: AsociarIngredienteRequest,
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.agregar_ingrediente(uow, producto_id, data)
 
 
 @router.patch("/{producto_id}/destacar", response_model=ProductoRead, summary="Toggle destacado en Home")

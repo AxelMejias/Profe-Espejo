@@ -81,3 +81,56 @@ def test_toggle_disponibilidad_admin(client, admin_headers, producto_factory):
                      json={"disponible": False})
     assert r.status_code == 200, r.text
     assert r.json()["disponible"] is False
+
+
+# ── Endpoints semánticos de imágenes e insumos (doc §5.2) ──────────────────────
+
+def test_actualizar_imagenes_admin(client, admin_headers, producto_factory):
+    prod = producto_factory(nombre="Burger Imagenes")
+    urls = ["https://cdn.test/x.png", "https://cdn.test/y.png"]
+    r = client.patch(f"/api/v1/productos/{prod.id}/imagenes", headers=admin_headers,
+                     json={"imagenes_url": urls})
+    assert r.status_code == 200, r.text
+    assert r.json()["imagenes_url"] == urls
+
+
+def test_actualizar_imagenes_requiere_admin(client, client_headers, producto_factory):
+    prod = producto_factory(nombre="Burger Imagenes RBAC")
+    r = client.patch(f"/api/v1/productos/{prod.id}/imagenes", headers=client_headers,
+                     json={"imagenes_url": []})
+    assert r.status_code == 403
+
+
+def test_listar_ingredientes_producto_publico(client):
+    items = client.get("/api/v1/productos/?size=50").json()["items"]
+    con_insumos = [p for p in items if p.get("insumos")]
+    assert con_insumos, "el seed debe tener productos con insumos"
+    pid = con_insumos[0]["id"]
+    r = client.get(f"/api/v1/productos/{pid}/ingredientes")
+    assert r.status_code == 200, r.text
+    insumos = r.json()
+    assert isinstance(insumos, list) and len(insumos) >= 1
+    assert "nombre" in insumos[0] and "cantidad" in insumos[0]
+
+
+def test_asociar_ingrediente_admin(client, admin_headers, producto_factory):
+    prod = producto_factory(nombre="Burger Asociar")
+    ing_id = client.get("/api/v1/ingredientes/", headers=admin_headers).json()["items"][0]["id"]
+    r = client.post(f"/api/v1/productos/{prod.id}/ingredientes", headers=admin_headers,
+                    json={"ingrediente_id": ing_id, "cantidad": "2.5"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["ingrediente_id"] == ing_id
+    assert body["unidad_medida_id"] > 0  # FK NN resuelta automáticamente
+    insumos = client.get(f"/api/v1/productos/{prod.id}/ingredientes").json()
+    assert any(i["ingrediente_id"] == ing_id for i in insumos)
+
+
+def test_asociar_ingrediente_duplicado_409(client, admin_headers, producto_factory):
+    prod = producto_factory(nombre="Burger Asociar Dup")
+    ing_id = client.get("/api/v1/ingredientes/", headers=admin_headers).json()["items"][0]["id"]
+    client.post(f"/api/v1/productos/{prod.id}/ingredientes", headers=admin_headers,
+                json={"ingrediente_id": ing_id, "cantidad": "1"})
+    r = client.post(f"/api/v1/productos/{prod.id}/ingredientes", headers=admin_headers,
+                    json={"ingrediente_id": ing_id, "cantidad": "1"})
+    assert r.status_code == 409, r.text

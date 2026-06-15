@@ -50,6 +50,28 @@ class ProductoUpdate(BaseModel):
     insumos: Optional[List[InsumoEnProductoCreate]] = None
 
 
+class ImagenProductoUpdate(BaseModel):
+    """Reemplaza la lista completa de imágenes del producto (doc §6.3)."""
+    imagenes_url: List[str]
+
+
+class AsociarIngredienteRequest(BaseModel):
+    """Asociar un insumo a un producto con cantidad y unidad (doc §5.2)."""
+    ingrediente_id: int = Field(gt=0)
+    cantidad: Decimal = Field(gt=0)
+    unidad_medida_id: Optional[int] = Field(default=None, gt=0)
+    es_removible: bool = False
+
+
+class ProductoIngredienteRead(BaseModel):
+    producto_id: int
+    ingrediente_id: int
+    nombre: str
+    cantidad: Decimal
+    unidad_medida_id: int
+    es_removible: bool
+
+
 class CategoriaSimple(BaseModel):
     id: int
     nombre: str

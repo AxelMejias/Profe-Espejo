@@ -255,6 +255,16 @@ def _seed_catalogo(session: Session):
     ud = session.exec(select(UnidadMedida).where(UnidadMedida.simbolo == "ud")).first()
     unidad_venta_id = ud.id if ud else None
 
+    # Resolución de la unidad de la receta (ProductoIngrediente.unidad_medida_id es NN)
+    unidades_all = session.exec(select(UnidadMedida)).all()
+
+    def _unidad_receta(texto: str) -> int:
+        t = (texto or "").strip().lower()
+        for u in unidades_all:
+            if u.simbolo.lower() == t or u.nombre.lower() == t:
+                return u.id
+        return ud.id  # fallback: unidad
+
     # Productos
     for nombre, desc, categoria, destacado, imagen, receta in _PRODUCTOS:
         costo = sum(insumos[n].costo_unitario * Decimal(str(c)) for n, c in receta)
@@ -278,6 +288,7 @@ def _seed_catalogo(session: Session):
                 ingrediente_id=insumos[n].id,
                 cantidad=Decimal(str(c)),
                 es_removible=(n in _REMOVIBLES),
+                unidad_medida_id=_unidad_receta(insumos[n].unidad_medida),
             ))
 
     session.commit()
