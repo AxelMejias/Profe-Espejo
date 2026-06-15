@@ -214,8 +214,11 @@ def procesar_webhook(
     if topic != "payment":
         return {"action": "ignored", "pedido_id": None}
 
+    # Ack 200 sin procesar: NO actuamos sobre una notificación cuya firma no valida
+    # (seguridad intacta), pero acusamos recibo para que MP no reintente
+    # (práctica estándar de webhooks; evita tormentas de reintentos en el log).
     if not validar_firma_webhook(x_signature, x_request_id, data_id):
-        _problem("INVALID_SIGNATURE", "Firma del webhook inválida", status.HTTP_401_UNAUTHORIZED)
+        return {"action": "unverified", "pedido_id": None}
 
     import mercadopago
     sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)

@@ -3,8 +3,8 @@ test_pagos_service.py — Tests para app/modules/pagos/service.py
 
 Dominio crítico (facturación). Cubre:
   - validar_firma_webhook: HMAC-SHA256 con MP_WEBHOOK_SECRET (válida / inválida / sin secret)
-  - procesar_webhook: firma inválida (401), topic ignorado, approved → confirma,
-                      rejected → cancela, idempotencia (no re-dispara)
+  - procesar_webhook: firma inválida (ack 200, no procesa), topic ignorado,
+                      approved → confirma, rejected → cancela, idempotencia (no re-dispara)
   - crear_preferencia_y_pago: persiste Pago con idempotency_key, devuelve init_point,
                               error del SDK → 502
 """
@@ -97,15 +97,16 @@ class TestValidarFirmaWebhook:
 class TestProcesarWebhook:
 
     @patch("app.modules.pagos.service.validar_firma_webhook", return_value=False)
-    def test_firma_invalida_lanza_401(self, _mock_firma):
+    def test_firma_invalida_acusa_recibo_sin_procesar(self, _mock_firma):
+        """Firma inválida: NO se procesa (seguridad), pero se acusa recibo (ack 200)
+        para que MP no reintente. Práctica estándar de webhooks."""
         uow = make_uow()
-        with pytest.raises(HTTPException) as exc:
-            service.procesar_webhook(
-                uow, topic="payment", data_id="9901",
-                x_signature="bad", x_request_id="r",
-            )
-        assert exc.value.status_code == 401
-        assert exc.value.detail["code"] == "INVALID_SIGNATURE"
+        result = service.procesar_webhook(
+            uow, topic="payment", data_id="9901",
+            x_signature="bad", x_request_id="r",
+        )
+        assert result["action"] == "unverified"
+        assert result["pedido_id"] is None
 
     @patch("app.modules.pagos.service.validar_firma_webhook", return_value=True)
     def test_topic_no_payment_se_ignora(self, _mock_firma):
