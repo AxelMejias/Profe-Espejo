@@ -2,6 +2,11 @@
 
 API REST construida con **FastAPI + SQLModel + PostgreSQL** siguiendo una arquitectura **feature-first** con capas estrictas (Router → Service → UnitOfWork → Repository → Model).
 
+👥 Integrantes
+Nicolas Hassan
+Leandro Nuñez
+Axel Mejias
+
 ## Repositorios del proyecto
 
 Arquitectura **polyrepo**: backend y frontend en repositorios separados.
