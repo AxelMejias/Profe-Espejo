@@ -11,7 +11,7 @@ Arquitectura **polyrepo**: backend y frontend en repositorios separados.
 | 🔧 Backend (este repo) | [AxelMejias/Profe-Espejo](https://github.com/AxelMejias/Profe-Espejo) | `FoodStoreBack` |
 | 🌐 Frontend | [AxelMejias/Prgo-4-Magni](https://github.com/AxelMejias/Prgo-4-Magni) | `Integrador` |
 
-🎥 **Video demostración (10-15 min):** _(pendiente — agregar link)_
+🎥 **Video demostración https://www.youtube.com/watch?v=ymQGzmx5ZYk
 
 ---
 
