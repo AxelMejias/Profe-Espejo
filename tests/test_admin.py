@@ -56,3 +56,46 @@ def test_eliminar_usuario(client, admin_headers):
     uid = _registrar(client, "admin_delete@test.com").json()["id"]
     r = client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers)
     assert r.status_code == 204, r.text
+
+
+# ── Guard "último admin": el sistema nunca debe quedarse sin administrador ──────
+
+def _admin_seed_id(client, admin_headers) -> int:
+    r = client.get("/api/v1/admin/usuarios?rol_codigo=ADMIN&size=100", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    return next(u["id"] for u in r.json()["items"] if u["email"] == "admin@foodstore.com")
+
+
+def test_no_se_puede_quitar_rol_admin_al_ultimo_admin(client, admin_headers):
+    """RED-04 equivalente: quitar ADMIN al único admin debe rechazarse (403)."""
+    admin_id = _admin_seed_id(client, admin_headers)
+    r = client.delete(f"/api/v1/admin/usuarios/{admin_id}/roles/ADMIN", headers=admin_headers)
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["code"] == "LAST_ADMIN"
+
+
+def test_no_se_puede_eliminar_al_ultimo_admin(client, admin_headers):
+    """Eliminar (baja lógica) al único admin debe rechazarse (403)."""
+    admin_id = _admin_seed_id(client, admin_headers)
+    r = client.delete(f"/api/v1/admin/usuarios/{admin_id}", headers=admin_headers)
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"]["code"] == "LAST_ADMIN"
+
+
+def test_se_puede_quitar_rol_admin_si_no_es_el_ultimo(client, admin_headers):
+    """Triangulación: con 2 admins, quitar el rol a uno SÍ se permite."""
+    uid = _registrar(client, "segundo_admin_rol@test.com").json()["id"]
+    client.post(f"/api/v1/admin/usuarios/{uid}/roles", headers=admin_headers,
+                json={"rol_codigo": "ADMIN"})
+    r = client.delete(f"/api/v1/admin/usuarios/{uid}/roles/ADMIN", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert all(rol["codigo"] != "ADMIN" for rol in r.json()["roles"])
+
+
+def test_se_puede_eliminar_admin_si_no_es_el_ultimo(client, admin_headers):
+    """Triangulación: con 2 admins, eliminar a uno SÍ se permite."""
+    uid = _registrar(client, "segundo_admin_del@test.com").json()["id"]
+    client.post(f"/api/v1/admin/usuarios/{uid}/roles", headers=admin_headers,
+                json={"rol_codigo": "ADMIN"})
+    r = client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers)
+    assert r.status_code == 204, r.text

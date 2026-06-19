@@ -57,6 +57,19 @@ class UsuarioAdminRepository:
             ).first()
         )
 
+    def count_active_admins(self) -> int:
+        """Cantidad de usuarios ACTIVOS (no soft-deleted) con rol ADMIN."""
+        return len(
+            self.session.exec(
+                select(UsuarioRol)
+                .join(Usuario, Usuario.id == UsuarioRol.usuario_id)
+                .where(
+                    UsuarioRol.rol_codigo == "ADMIN",
+                    Usuario.deleted_at == None,  # noqa: E711
+                )
+            ).all()
+        )
+
     def add_rol(self, usuario_rol: UsuarioRol) -> None:
         self.session.add(usuario_rol)
         self.session.flush()

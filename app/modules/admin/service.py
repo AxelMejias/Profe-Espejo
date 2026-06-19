@@ -71,6 +71,15 @@ def delete(uow, usuario_id: int) -> None:
     usuario = uow.usuarios_admin.get_by_id(usuario_id)
     if not usuario:
         _problem("USER_NOT_FOUND", f"Usuario {usuario_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    # Guard: nunca dejar al sistema sin administrador (cubre "no borrarte si sos el único admin").
+    if uow.usuarios_admin.has_rol(usuario_id, "ADMIN") and uow.usuarios_admin.count_active_admins() <= 1:
+        _problem(
+            "LAST_ADMIN",
+            "No podés eliminar al último administrador del sistema",
+            status.HTTP_403_FORBIDDEN,
+        )
+
     uow.usuarios_admin.soft_delete(usuario)
 
 
@@ -97,6 +106,18 @@ def remover_rol(uow, usuario_id: int, rol_codigo: str) -> UsuarioAdminResponse:
     usuario = uow.usuarios_admin.get_by_id(usuario_id)
     if not usuario:
         _problem("USER_NOT_FOUND", f"Usuario {usuario_id} no encontrado", status.HTTP_404_NOT_FOUND)
+
+    # Guard: no quitar el rol ADMIN al último administrador del sistema.
+    if (
+        rol_codigo == "ADMIN"
+        and uow.usuarios_admin.has_rol(usuario_id, "ADMIN")
+        and uow.usuarios_admin.count_active_admins() <= 1
+    ):
+        _problem(
+            "LAST_ADMIN",
+            "No podés quitar el rol de administrador al último admin del sistema",
+            status.HTTP_403_FORBIDDEN,
+        )
 
     removed = uow.usuarios_admin.remove_rol(usuario_id, rol_codigo)
     if not removed:

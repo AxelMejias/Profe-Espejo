@@ -108,6 +108,7 @@ class TestDelete:
         uow = make_uow()
         usuario = mock_usuario()
         uow.usuarios_admin.get_by_id.return_value = usuario
+        uow.usuarios_admin.has_rol.return_value = False  # usuario normal (no admin) -> sin guard
 
         service.delete(uow, 1)
 
@@ -120,6 +121,30 @@ class TestDelete:
             service.delete(uow, 99)
 
         assert exc.value.status_code == 404
+
+    def test_delete_ultimo_admin_lanza_403(self):
+        uow = make_uow()
+        uow.usuarios_admin.get_by_id.return_value = mock_usuario()
+        uow.usuarios_admin.has_rol.return_value = True             # el usuario es ADMIN
+        uow.usuarios_admin.count_active_admins.return_value = 1    # y es el único
+
+        with pytest.raises(HTTPException) as exc:
+            service.delete(uow, 1)
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail["code"] == "LAST_ADMIN"
+        uow.usuarios_admin.soft_delete.assert_not_called()
+
+    def test_delete_admin_no_ultimo_si_borra(self):
+        uow = make_uow()
+        usuario = mock_usuario()
+        uow.usuarios_admin.get_by_id.return_value = usuario
+        uow.usuarios_admin.has_rol.return_value = True             # es ADMIN
+        uow.usuarios_admin.count_active_admins.return_value = 2    # pero hay otro
+
+        service.delete(uow, 1)
+
+        uow.usuarios_admin.soft_delete.assert_called_once_with(usuario)
 
 
 class TestAsignarRol:
@@ -184,3 +209,16 @@ class TestRemoverRol:
 
         assert exc.value.status_code == 404
         assert exc.value.detail["code"] == "ROL_NOT_ASSIGNED"
+
+    def test_remover_rol_admin_al_ultimo_admin_lanza_403(self):
+        uow = make_uow()
+        uow.usuarios_admin.get_by_id.return_value = mock_usuario()
+        uow.usuarios_admin.has_rol.return_value = True             # tiene ADMIN
+        uow.usuarios_admin.count_active_admins.return_value = 1    # es el único
+
+        with pytest.raises(HTTPException) as exc:
+            service.remover_rol(uow, 1, "ADMIN")
+
+        assert exc.value.status_code == 403
+        assert exc.value.detail["code"] == "LAST_ADMIN"
+        uow.usuarios_admin.remove_rol.assert_not_called()
