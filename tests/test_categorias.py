@@ -51,3 +51,43 @@ def test_eliminar_categoria_admin(client, admin_headers):
     assert r.status_code == 204, r.text
     # Soft delete: ya no se obtiene.
     assert client.get(f"/api/v1/categorias/{cid}").status_code == 404
+
+
+# ── Categorías inactivas (soft delete) + reactivación ──────────────────────────
+
+def test_categoria_dada_de_baja_aparece_en_inactivas(client, admin_headers):
+    cid = client.post("/api/v1/categorias/", headers=admin_headers,
+                      json={"nombre": "Categoria Inactiva Listar"}).json()["id"]
+    client.delete(f"/api/v1/categorias/{cid}", headers=admin_headers)
+
+    # No está en activas (lista pública).
+    activas = client.get("/api/v1/categorias/?size=100").json()["items"]
+    assert all(c["id"] != cid for c in activas)
+    # Sí está en inactivas.
+    inactivas = client.get("/api/v1/categorias/inactivos?size=100", headers=admin_headers).json()["items"]
+    encontrada = next((c for c in inactivas if c["id"] == cid), None)
+    assert encontrada is not None and encontrada["deleted_at"] is not None
+
+
+def test_listar_inactivas_requiere_admin(client, client_headers):
+    r = client.get("/api/v1/categorias/inactivos", headers=client_headers)
+    assert r.status_code == 403
+
+
+def test_reactivar_categoria_admin(client, admin_headers):
+    cid = client.post("/api/v1/categorias/", headers=admin_headers,
+                      json={"nombre": "Categoria Reactivar"}).json()["id"]
+    client.delete(f"/api/v1/categorias/{cid}", headers=admin_headers)
+
+    r = client.patch(f"/api/v1/categorias/{cid}/reactivar", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted_at"] is None
+    # Vuelve a ser visible/obtenible.
+    assert client.get(f"/api/v1/categorias/{cid}").status_code == 200
+
+
+def test_reactivar_categoria_activa_da_404(client, admin_headers):
+    cid = client.post("/api/v1/categorias/", headers=admin_headers,
+                      json={"nombre": "Categoria Ya Activa"}).json()["id"]
+    r = client.patch(f"/api/v1/categorias/{cid}/reactivar", headers=admin_headers)
+    assert r.status_code == 404, r.text

@@ -31,6 +31,29 @@ def get_all(uow, nombre: Optional[str] = None, page: int = 1, size: int = 20) ->
     )
 
 
+def get_all_inactivos(uow, nombre: Optional[str] = None, page: int = 1, size: int = 20) -> PaginatedCategorias:
+    items, total = uow.categorias.get_all_inactivos(nombre=nombre, page=page, size=size)
+    return PaginatedCategorias(
+        items=[CategoriaRead.model_validate(c) for c in items],
+        total=total,
+        page=page,
+        size=size,
+        pages=math.ceil(total / size) if total else 0,
+    )
+
+
+def reactivar(uow, categoria_id: int) -> CategoriaRead:
+    categoria = uow.categorias.get_by_id_inactivo(categoria_id)
+    if not categoria:
+        _problem(
+            "CATEGORIA_NOT_FOUND",
+            f"Categoría {categoria_id} no encontrada o ya está activa",
+            status.HTTP_404_NOT_FOUND,
+        )
+    uow.categorias.reactivar(categoria)
+    return CategoriaRead.model_validate(categoria)
+
+
 def get_by_id(uow, categoria_id: int) -> CategoriaRead:
     categoria = uow.categorias.get_by_id(categoria_id)
     if not categoria:

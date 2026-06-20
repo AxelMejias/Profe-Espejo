@@ -31,6 +31,21 @@ def listar_categorias(
         return service.get_all(uow, nombre=nombre, page=page, size=size)
 
 
+@router.get(
+    "/inactivos",
+    response_model=PaginatedCategorias,
+    summary="Listar categorías dadas de baja (soft delete)",
+)
+def listar_categorias_inactivas(
+    nombre: Annotated[Optional[str], Query(max_length=100)] = None,
+    page:   Annotated[int, Query(ge=1)] = 1,
+    size:   Annotated[int, Query(ge=1, le=100)] = 20,
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.get_all_inactivos(uow, nombre=nombre, page=page, size=size)
+
+
 @router.get("/{categoria_id}", response_model=CategoriaRead, summary="Obtener categoría por ID")
 def obtener_categoria(categoria_id: Annotated[int, Path(ge=1)]):
     with UnitOfWork() as uow:
@@ -57,6 +72,16 @@ def actualizar_categoria(
 ):
     with UnitOfWork() as uow:
         return service.update(uow, categoria_id, data)
+
+
+@router.patch(
+    "/{categoria_id}/reactivar",
+    response_model=CategoriaRead,
+    summary="Reactivar una categoría dada de baja",
+)
+def reactivar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+    with UnitOfWork() as uow:
+        return service.reactivar(uow, categoria_id)
 
 
 @router.delete("/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de categoría")

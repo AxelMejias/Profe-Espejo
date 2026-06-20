@@ -25,6 +25,7 @@ class CategoriaRead(BaseModel):
     imagen_url: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
