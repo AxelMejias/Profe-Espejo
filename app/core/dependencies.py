@@ -43,9 +43,9 @@ def get_current_user_payload(
     except JWTError:
         _problem("INVALID_TOKEN", "Token inválido o expirado", status.HTTP_401_UNAUTHORIZED)
 
-    # El token es válido, pero la cuenta pudo haberse dado de baja después de emitirlo.
-    # La baja debe tener efecto INMEDIATO aunque el JWT siga vigente: si el usuario ya
-    # no está activo, se rechaza el acceso (no puede comprar ni operar).
+    # El token es válido, pero la cuenta/roles pudieron cambiar después de emitirlo.
+    # Se valida contra la BD para que tanto la BAJA como los CAMBIOS DE ROL tengan
+    # efecto INMEDIATO, aunque el JWT siga vigente con datos viejos.
     sub = payload.get("sub")
     if sub is not None:
         from app.core.unit_of_work import UnitOfWork
@@ -56,6 +56,10 @@ def get_current_user_payload(
                     "Tu cuenta fue dada de baja",
                     status.HTTP_401_UNAUTHORIZED,
                 )
+            # Roles frescos desde la BD: pisan el claim del token (que puede estar
+            # desactualizado si un admin agregó/quitó un rol).
+            roles = uow.usuarios.get_roles(int(sub))
+            payload["roles"] = [r.codigo for r in roles]
 
     return payload
 

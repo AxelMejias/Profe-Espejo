@@ -36,11 +36,13 @@ def get_all(
     uow,
     rol_codigo: Optional[str] = None,
     solo_inactivos: bool = False,
+    search: Optional[str] = None,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedUsuarios:
     items, total = uow.usuarios_admin.get_all(
-        rol_codigo=rol_codigo, solo_inactivos=solo_inactivos, page=page, size=size,
+        rol_codigo=rol_codigo, solo_inactivos=solo_inactivos, search=search,
+        page=page, size=size,
     )
     return PaginatedUsuarios(
         items=[_build_response(uow, u) for u in items],

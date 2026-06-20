@@ -164,3 +164,48 @@ def test_reactivar_usuario_activo_da_404(client, admin_headers):
     uid = _registrar(client, "ya_activo@test.com").json()["id"]
     r = client.patch(f"/api/v1/admin/usuarios/{uid}/reactivar", headers=admin_headers)
     assert r.status_code == 404, r.text
+
+
+# ── Búsqueda de usuarios ───────────────────────────────────────────────────────
+
+def test_buscar_usuario_por_email(client, admin_headers):
+    _registrar(client, "buscable_unico@test.com")
+    r = client.get("/api/v1/admin/usuarios?q=buscable_unico&size=100", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    emails = [u["email"] for u in r.json()["items"]]
+    assert "buscable_unico@test.com" in emails
+
+
+def test_buscar_usuario_por_nombre(client, admin_headers):
+    # El registro crea nombre "Test"; buscamos por ese nombre y debe traer resultados.
+    _registrar(client, "buscable_nombre@test.com")
+    r = client.get("/api/v1/admin/usuarios?q=Test&size=100", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert any(u["email"] == "buscable_nombre@test.com" for u in r.json()["items"])
+
+
+def test_buscar_usuario_sin_coincidencias(client, admin_headers):
+    r = client.get("/api/v1/admin/usuarios?q=zzz_no_existe_nadie_zzz", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 0
+
+
+# ── Cambio de rol con efecto inmediato ─────────────────────────────────────────
+
+def test_quitar_rol_admin_corta_acceso_de_inmediato(client, admin_headers):
+    """Si a un usuario con sesión activa se le quita el rol ADMIN, pierde el acceso
+    a los endpoints de admin al instante, aunque su JWT siga teniendo el rol viejo."""
+    uid = _registrar(client, "demote_admin@test.com").json()["id"]
+    client.post(f"/api/v1/admin/usuarios/{uid}/roles", headers=admin_headers,
+                json={"rol_codigo": "ADMIN"})
+    user_headers = _login_bearer(client, "demote_admin@test.com")
+
+    # Con rol ADMIN puede listar usuarios.
+    assert client.get("/api/v1/admin/usuarios", headers=user_headers).status_code == 200
+
+    # El admin le quita el rol ADMIN…
+    assert client.delete(f"/api/v1/admin/usuarios/{uid}/roles/ADMIN",
+                         headers=admin_headers).status_code == 200
+
+    # …y su token deja de tener acceso de admin de inmediato (roles frescos de la BD).
+    assert client.get("/api/v1/admin/usuarios", headers=user_headers).status_code == 403

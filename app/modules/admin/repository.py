@@ -2,6 +2,7 @@ import math
 from datetime import datetime
 from typing import List, Optional, Tuple
 from sqlmodel import Session, select
+from sqlalchemy import or_
 
 from app.modules.auth.model import Usuario, UsuarioRol, Rol
 
@@ -14,6 +15,7 @@ class UsuarioAdminRepository:
         self,
         rol_codigo: Optional[str] = None,
         solo_inactivos: bool = False,
+        search: Optional[str] = None,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Usuario], int]:
@@ -25,6 +27,16 @@ class UsuarioAdminRepository:
                 query
                 .join(UsuarioRol, UsuarioRol.usuario_id == Usuario.id)
                 .where(UsuarioRol.rol_codigo == rol_codigo)
+            )
+
+        if search:
+            term = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    Usuario.nombre.ilike(term),
+                    Usuario.apellido.ilike(term),
+                    Usuario.email.ilike(term),
+                )
             )
 
         total = len(self.session.exec(query).all())
