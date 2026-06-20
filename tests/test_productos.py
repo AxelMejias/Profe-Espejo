@@ -134,3 +134,112 @@ def test_asociar_ingrediente_duplicado_409(client, admin_headers, producto_facto
     r = client.post(f"/api/v1/productos/{prod.id}/ingredientes", headers=admin_headers,
                     json={"ingrediente_id": ing_id, "cantidad": "1"})
     assert r.status_code == 409, r.text
+
+
+def test_baja_de_insumo_deja_producto_sin_stock(client, admin_headers):
+    """Si un insumo de la receta se da de baja, el producto figura SIN STOCK
+    (stock_disponible = 0) y el insumo sigue visible (activo=False) sin que el costo
+    baje. Al reactivar el insumo, el producto recupera su stock."""
+    def crear_ing(nombre, costo, stock):
+        return client.post("/api/v1/ingredientes/", headers=admin_headers, json={
+            "nombre": nombre, "unidad_medida": "u", "costo_unitario": costo,
+            "stock_cantidad": stock, "stock_minimo": "0.000",
+        }).json()["id"]
+
+    a = crear_ing("Cheddar Baja Test", "10.00", "100.000")   # se dará de baja
+    b = crear_ing("Pan Baja Test", "5.00", "100.000")
+
+    pid = client.post("/api/v1/productos/", headers=admin_headers, json={
+        "nombre": "Hamburguesa Baja Test", "margen_ganancia": "0.30",
+        "insumos": [
+            {"ingrediente_id": a, "cantidad": "2"},
+            {"ingrediente_id": b, "cantidad": "1"},
+        ],
+    }).json()["id"]
+
+    antes = client.get(f"/api/v1/productos/{pid}").json()
+    assert antes["stock_disponible"] == 50      # min(100//2, 100//1)
+    assert Decimal(antes["precio_base"]) == Decimal("32.50")   # (2*10 + 1*5) * 1.30
+
+    # Baja del cheddar.
+    assert client.delete(f"/api/v1/ingredientes/{a}", headers=admin_headers).status_code == 204
+
+    dur = client.get(f"/api/v1/productos/{pid}").json()
+    assert dur["stock_disponible"] == 0, "el producto debe quedar sin stock"
+    # El insumo NO se quita de la receta: sigue listado pero marcado inactivo.
+    cheddar = next(i for i in dur["insumos"] if i["ingrediente_id"] == a)
+    assert cheddar["activo"] is False
+    assert Decimal(cheddar["stock_actual"]) == 0
+    # El costo (y por ende el precio) no bajan artificialmente.
+    assert Decimal(dur["costo_total_insumos"]) == Decimal("25.00")
+    assert Decimal(dur["precio_base"]) == Decimal("32.50")
+
+    # Reactivar el insumo restaura el stock del producto.
+    assert client.patch(f"/api/v1/ingredientes/{a}/reactivar", headers=admin_headers).status_code == 200
+    despues = client.get(f"/api/v1/productos/{pid}").json()
+    assert despues["stock_disponible"] == 50
+    assert next(i for i in despues["insumos"] if i["ingrediente_id"] == a)["activo"] is True
+
+
+def test_editar_producto_conserva_o_quita_insumo_dado_de_baja(client, admin_headers):
+    """Editar un producto con un insumo discontinuado no rompe (no 404): se puede
+    guardar conservándolo (queda sin stock) o quitándolo de la receta."""
+    def crear_ing(nombre, costo, stock):
+        return client.post("/api/v1/ingredientes/", headers=admin_headers, json={
+            "nombre": nombre, "unidad_medida": "u", "costo_unitario": costo,
+            "stock_cantidad": stock, "stock_minimo": "0.000",
+        }).json()["id"]
+
+    a = crear_ing("Cheddar Edit Baja", "10.00", "100.000")
+    b = crear_ing("Pan Edit Baja", "5.00", "100.000")
+    pid = client.post("/api/v1/productos/", headers=admin_headers, json={
+        "nombre": "Hamburguesa Edit Baja", "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": a, "cantidad": "2"}, {"ingrediente_id": b, "cantidad": "1"}],
+    }).json()["id"]
+    client.delete(f"/api/v1/ingredientes/{a}", headers=admin_headers)
+
+    # 1) Guardar conservando el insumo dado de baja (lo que manda el form si no se quita).
+    r = client.put(f"/api/v1/productos/{pid}", headers=admin_headers, json={
+        "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": a, "cantidad": "2"}, {"ingrediente_id": b, "cantidad": "1"}],
+    })
+    assert r.status_code == 200, r.text
+    body = client.get(f"/api/v1/productos/{pid}").json()
+    assert body["stock_disponible"] == 0
+    assert any(i["ingrediente_id"] == a and i["activo"] is False for i in body["insumos"])
+
+    # 2) Quitar el insumo dado de baja → queda solo el pan, con stock.
+    r = client.put(f"/api/v1/productos/{pid}", headers=admin_headers, json={
+        "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": b, "cantidad": "1"}],
+    })
+    assert r.status_code == 200, r.text
+    body = client.get(f"/api/v1/productos/{pid}").json()
+    assert all(i["ingrediente_id"] != a for i in body["insumos"])
+    assert body["stock_disponible"] == 100   # 100 // 1
+
+
+def test_cambio_costo_ingrediente_recalcula_precio_producto(client, admin_headers):
+    """Al subir el costo de un insumo, el precio_base del producto que lo usa se
+    recalcula y persiste: precio = costo_insumos * (1 + margen)."""
+    # Insumo a $10
+    ing_id = client.post("/api/v1/ingredientes/", headers=admin_headers, json={
+        "nombre": "Insumo Recalc Precio", "unidad_medida": "u", "costo_unitario": "10.00",
+        "stock_cantidad": "100.000", "stock_minimo": "0.000",
+    }).json()["id"]
+
+    # Producto: 2 unidades del insumo, margen 30% → precio = 2*10*1.3 = 26.00
+    pid = client.post("/api/v1/productos/", headers=admin_headers, json={
+        "nombre": "Producto Recalc Precio", "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": ing_id, "cantidad": "2"}],
+    }).json()["id"]
+    assert Decimal(client.get(f"/api/v1/productos/{pid}").json()["precio_base"]) == Decimal("26.00")
+
+    # Sube el costo del insumo a $20 → precio = 2*20*1.3 = 52.00
+    r = client.put(f"/api/v1/ingredientes/{ing_id}", headers=admin_headers,
+                   json={"costo_unitario": "20.00"})
+    assert r.status_code == 200, r.text
+
+    body = client.get(f"/api/v1/productos/{pid}").json()
+    assert Decimal(body["precio_base"]) == Decimal("52.00")
+    assert Decimal(body["costo_total_insumos"]) == Decimal("40.00")

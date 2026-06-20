@@ -99,3 +99,68 @@ def test_se_puede_eliminar_admin_si_no_es_el_ultimo(client, admin_headers):
                 json={"rol_codigo": "ADMIN"})
     r = client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers)
     assert r.status_code == 204, r.text
+
+
+# ── Baja con efecto inmediato + soft delete + reactivación ─────────────────────
+
+def _login_bearer(client, email, password="Test1234!") -> dict:
+    r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+    token = r.json()["access_token"]
+    client.cookies.clear()
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_baja_bloquea_token_existente_de_inmediato(client, admin_headers):
+    """Concern #1: dar de baja a un usuario invalida su sesión activa al instante,
+    aunque su JWT siga vigente (no puede seguir operando/comprando)."""
+    uid = _registrar(client, "baja_inmediata@test.com").json()["id"]
+    user_headers = _login_bearer(client, "baja_inmediata@test.com")
+
+    # Con la cuenta activa, el usuario puede operar.
+    assert client.get("/api/v1/direcciones/", headers=user_headers).status_code == 200
+
+    # El admin lo da de baja…
+    assert client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers).status_code == 204
+
+    # …y su token deja de funcionar de inmediato.
+    r = client.get("/api/v1/direcciones/", headers=user_headers)
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "USER_INACTIVE"
+
+
+def test_usuario_dado_de_baja_no_aparece_en_activos_pero_si_en_inactivos(client, admin_headers):
+    """Concern #2: la baja es lógica. El usuario sale del listado de activos pero
+    sigue consultable con solo_inactivos=true (no es un borrado total)."""
+    uid = _registrar(client, "baja_logica@test.com").json()["id"]
+    client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers)
+
+    activos = client.get("/api/v1/admin/usuarios?size=100", headers=admin_headers).json()["items"]
+    assert all(u["id"] != uid for u in activos)
+
+    inactivos = client.get("/api/v1/admin/usuarios?solo_inactivos=true&size=100", headers=admin_headers).json()["items"]
+    encontrado = next((u for u in inactivos if u["id"] == uid), None)
+    assert encontrado is not None and encontrado["deleted_at"] is not None
+
+
+def test_reactivar_usuario_restaura_acceso(client, admin_headers):
+    """Concern #2: reactivar un usuario lo vuelve activo y le devuelve el acceso."""
+    uid = _registrar(client, "reactivar@test.com").json()["id"]
+    client.delete(f"/api/v1/admin/usuarios/{uid}", headers=admin_headers)
+
+    r = client.patch(f"/api/v1/admin/usuarios/{uid}/reactivar", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted_at"] is None
+
+    # Vuelve a aparecer en activos y puede loguearse/operar de nuevo.
+    activos = client.get("/api/v1/admin/usuarios?size=100", headers=admin_headers).json()["items"]
+    assert any(u["id"] == uid for u in activos)
+    user_headers = _login_bearer(client, "reactivar@test.com")
+    assert client.get("/api/v1/direcciones/", headers=user_headers).status_code == 200
+
+
+def test_reactivar_usuario_activo_da_404(client, admin_headers):
+    """Reactivar a alguien que no está dado de baja no tiene sentido → 404."""
+    uid = _registrar(client, "ya_activo@test.com").json()["id"]
+    r = client.patch(f"/api/v1/admin/usuarios/{uid}/reactivar", headers=admin_headers)
+    assert r.status_code == 404, r.text

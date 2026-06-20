@@ -13,10 +13,12 @@ class UsuarioAdminRepository:
     def get_all(
         self,
         rol_codigo: Optional[str] = None,
+        solo_inactivos: bool = False,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Usuario], int]:
-        query = select(Usuario).where(Usuario.deleted_at == None)
+        activo_cond = Usuario.deleted_at != None if solo_inactivos else Usuario.deleted_at == None
+        query = select(Usuario).where(activo_cond)
 
         if rol_codigo:
             query = (
@@ -35,6 +37,14 @@ class UsuarioAdminRepository:
             select(Usuario).where(
                 Usuario.id == usuario_id,
                 Usuario.deleted_at == None,
+            )
+        ).first()
+
+    def get_by_id_inactivo(self, usuario_id: int) -> Optional[Usuario]:
+        return self.session.exec(
+            select(Usuario).where(
+                Usuario.id == usuario_id,
+                Usuario.deleted_at != None,
             )
         ).first()
 
@@ -98,5 +108,11 @@ class UsuarioAdminRepository:
 
     def soft_delete(self, usuario: Usuario) -> None:
         usuario.deleted_at = datetime.utcnow()
+        self.session.add(usuario)
+        self.session.flush()
+
+    def reactivar(self, usuario: Usuario) -> None:
+        usuario.deleted_at = None
+        usuario.updated_at = datetime.utcnow()
         self.session.add(usuario)
         self.session.flush()

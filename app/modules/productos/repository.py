@@ -83,6 +83,20 @@ class ProductoRepository(BaseRepository[Producto]):
             ).all()
         )
 
+    def get_por_ingrediente(self, ingrediente_id: int) -> List[Producto]:
+        """Productos activos (no borrados) que usan el ingrediente como insumo.
+        Se usa para recalcular su precio cuando cambia el costo del ingrediente."""
+        stmt = (
+            select(Producto)
+            .join(ProductoIngrediente, ProductoIngrediente.producto_id == Producto.id)
+            .where(
+                ProductoIngrediente.ingrediente_id == ingrediente_id,
+                Producto.deleted_at == None,
+            )
+            .distinct()
+        )
+        return list(self.session.exec(stmt).all())
+
     def add_categoria_link(self, producto_id: int, categoria_id: int) -> None:
         self.session.add(ProductoCategoria(producto_id=producto_id, categoria_id=categoria_id))
         self.session.flush()

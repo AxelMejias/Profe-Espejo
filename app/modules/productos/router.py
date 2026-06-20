@@ -14,6 +14,7 @@ from app.modules.productos.schemas import (
 from app.modules.productos import service
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
+from app.core.websocket import emit_catalogo_evento
 
 
 router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
@@ -87,7 +88,7 @@ def descargar_plantilla(_=_ADMIN):
 
 
 @router.post("/importar", summary="Importar productos desde Excel")
-def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
+async def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
     from app.modules.productos.model import Producto
     from app.core.links import ProductoIngrediente
     from sqlmodel import select
@@ -192,6 +193,8 @@ def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
             nombre_str = str(row[0]) if row and row[0] is not None else ""
             errores.append({"fila": idx, "nombre": nombre_str, "motivo": str(e)})
 
+    if creados:
+        await emit_catalogo_evento("producto_actualizado")
     return {"creados": creados, "omitidos": omitidos, "errores": errores}
 
 
@@ -237,45 +240,55 @@ def obtener_producto(producto_id: Annotated[int, Path(ge=1)]):
 
 
 @router.post("/", response_model=ProductoRead, status_code=status.HTTP_201_CREATED, summary="Crear producto")
-def crear_producto(data: ProductoCreate, _=_ADMIN):
+async def crear_producto(data: ProductoCreate, _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.create(uow, data)
+        result = service.create(uow, data)
+    await emit_catalogo_evento("producto_creado", producto_id=result.id)
+    return result
 
 
 @router.put("/{producto_id}", response_model=ProductoRead, summary="Actualizar producto")
-def actualizar_producto(
+async def actualizar_producto(
     producto_id: Annotated[int, Path(ge=1)],
     data: ProductoUpdate,
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.update(uow, producto_id, data)
+        result = service.update(uow, producto_id, data)
+    await emit_catalogo_evento("producto_actualizado", producto_id=result.id)
+    return result
 
 
 @router.patch("/{producto_id}/reactivar", response_model=ProductoRead, summary="Reactivar producto inactivo")
-def reactivar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def reactivar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.reactivar(uow, producto_id)
+        result = service.reactivar(uow, producto_id)
+    await emit_catalogo_evento("producto_actualizado", producto_id=result.id)
+    return result
 
 
 @router.patch("/{producto_id}/disponibilidad", response_model=ProductoRead, summary="Toggle disponibilidad")
-def toggle_disponibilidad(
+async def toggle_disponibilidad(
     producto_id: Annotated[int, Path(ge=1)],
     disponible: bool = Body(..., embed=True),
     _=_DISPONIBILIDAD,
 ):
     with UnitOfWork() as uow:
-        return service.toggle_disponibilidad(uow, producto_id, disponible)
+        result = service.toggle_disponibilidad(uow, producto_id, disponible)
+    await emit_catalogo_evento("producto_actualizado", producto_id=result.id)
+    return result
 
 
 @router.patch("/{producto_id}/imagenes", response_model=ProductoRead, summary="Actualizar lista de imágenes del producto")
-def actualizar_imagenes(
+async def actualizar_imagenes(
     producto_id: Annotated[int, Path(ge=1)],
     data: ImagenProductoUpdate,
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.set_imagenes(uow, producto_id, data.imagenes_url)
+        result = service.set_imagenes(uow, producto_id, data.imagenes_url)
+    await emit_catalogo_evento("producto_actualizado", producto_id=result.id)
+    return result
 
 
 @router.get("/{producto_id}/ingredientes", response_model=list[InsumoEnProductoRead], summary="Listar insumos del producto")
@@ -286,26 +299,31 @@ def listar_ingredientes_producto(producto_id: Annotated[int, Path(ge=1)]):
 
 @router.post("/{producto_id}/ingredientes", response_model=ProductoIngredienteRead,
              status_code=status.HTTP_201_CREATED, summary="Asociar insumo al producto")
-def asociar_ingrediente(
+async def asociar_ingrediente(
     producto_id: Annotated[int, Path(ge=1)],
     data: AsociarIngredienteRequest,
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.agregar_ingrediente(uow, producto_id, data)
+        result = service.agregar_ingrediente(uow, producto_id, data)
+    await emit_catalogo_evento("producto_actualizado", producto_id=producto_id)
+    return result
 
 
 @router.patch("/{producto_id}/destacar", response_model=ProductoRead, summary="Toggle destacado en Home")
-def toggle_destacado(
+async def toggle_destacado(
     producto_id: Annotated[int, Path(ge=1)],
     destacado: bool = Body(..., embed=True),
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.toggle_destacado(uow, producto_id, destacado)
+        result = service.toggle_destacado(uow, producto_id, destacado)
+    await emit_catalogo_evento("producto_actualizado", producto_id=result.id)
+    return result
 
 
 @router.delete("/{producto_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de producto")
-def eliminar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def eliminar_producto(producto_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
         service.delete(uow, producto_id)
+    await emit_catalogo_evento("producto_eliminado", producto_id=producto_id)

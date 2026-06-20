@@ -21,12 +21,15 @@ _ADMIN = Depends(require_role(["ADMIN"]))
 )
 def listar_usuarios(
     rol_codigo: Annotated[Optional[str], Query(max_length=20)] = None,
+    solo_inactivos: Annotated[bool, Query()] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.get_all(uow, rol_codigo=rol_codigo, page=page, size=size)
+        return service.get_all(
+            uow, rol_codigo=rol_codigo, solo_inactivos=solo_inactivos, page=page, size=size,
+        )
 
 
 @router.get(
@@ -67,6 +70,19 @@ def eliminar_usuario(
 ):
     with UnitOfWork() as uow:
         service.delete(uow, usuario_id)
+
+
+@router.patch(
+    "/usuarios/{usuario_id}/reactivar",
+    response_model=UsuarioAdminResponse,
+    summary="Reactivar un usuario dado de baja",
+)
+def reactivar_usuario(
+    usuario_id: Annotated[int, Path(ge=1)],
+    _=_ADMIN,
+):
+    with UnitOfWork() as uow:
+        return service.reactivar(uow, usuario_id)
 
 
 @router.post(

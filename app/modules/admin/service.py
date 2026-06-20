@@ -35,11 +35,12 @@ def _build_response(uow, usuario) -> UsuarioAdminResponse:
 def get_all(
     uow,
     rol_codigo: Optional[str] = None,
+    solo_inactivos: bool = False,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedUsuarios:
     items, total = uow.usuarios_admin.get_all(
-        rol_codigo=rol_codigo, page=page, size=size,
+        rol_codigo=rol_codigo, solo_inactivos=solo_inactivos, page=page, size=size,
     )
     return PaginatedUsuarios(
         items=[_build_response(uow, u) for u in items],
@@ -81,6 +82,21 @@ def delete(uow, usuario_id: int) -> None:
         )
 
     uow.usuarios_admin.soft_delete(usuario)
+    # Revocar los refresh tokens activos: la baja debe cortar la sesión de inmediato,
+    # sin que el usuario pueda renovar su access token desde el store.
+    uow.refresh_tokens.revoke_all_for_user(usuario_id)
+
+
+def reactivar(uow, usuario_id: int) -> UsuarioAdminResponse:
+    usuario = uow.usuarios_admin.get_by_id_inactivo(usuario_id)
+    if not usuario:
+        _problem(
+            "USER_NOT_FOUND",
+            f"Usuario {usuario_id} no encontrado o ya está activo",
+            status.HTTP_404_NOT_FOUND,
+        )
+    uow.usuarios_admin.reactivar(usuario)
+    return _build_response(uow, usuario)
 
 
 def asignar_rol(uow, usuario_id: int, rol_codigo: str, actor_id: int) -> UsuarioAdminResponse:

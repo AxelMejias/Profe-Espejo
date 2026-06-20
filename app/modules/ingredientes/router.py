@@ -8,8 +8,10 @@ from app.modules.ingredientes.schemas import (
     IngredienteCreate, IngredienteUpdate, IngredienteResponse, PaginatedIngredientes,
 )
 from app.modules.ingredientes import service
+from app.modules.productos import service as productos_service
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
+from app.core.websocket import emit_catalogo_evento
 
 router = APIRouter(prefix="/api/v1/ingredientes", tags=["Ingredientes"])
 
@@ -68,7 +70,7 @@ def descargar_plantilla(_=_ADMIN):
 
 
 @router.post("/importar", summary="Importar ingredientes desde Excel")
-def importar_ingredientes(archivo: UploadFile = File(...), _=_ADMIN):
+async def importar_ingredientes(archivo: UploadFile = File(...), _=_ADMIN):
     from app.modules.ingredientes.model import Ingrediente
 
     contents = archivo.file.read()
@@ -127,6 +129,8 @@ def importar_ingredientes(archivo: UploadFile = File(...), _=_ADMIN):
             nombre_str = str(row[0]) if row and row[0] is not None else ""
             errores.append({"fila": idx, "nombre": nombre_str, "motivo": str(e)})
 
+    if creados:
+        await emit_catalogo_evento("ingrediente_actualizado")
     return {"creados": creados, "omitidos": omitidos, "errores": errores}
 
 
@@ -175,28 +179,41 @@ def obtener_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_LEER):
 
 
 @router.post("/", response_model=IngredienteResponse, status_code=status.HTTP_201_CREATED, summary="Crear ingrediente")
-def crear_ingrediente(data: IngredienteCreate, _=_ADMIN):
+async def crear_ingrediente(data: IngredienteCreate, _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.create(uow, data)
+        result = service.create(uow, data)
+    await emit_catalogo_evento("ingrediente_creado", ingrediente_id=result.id)
+    return result
 
 
 @router.put("/{ingrediente_id}", response_model=IngredienteResponse, summary="Actualizar ingrediente")
-def actualizar_ingrediente(
+async def actualizar_ingrediente(
     ingrediente_id: Annotated[int, Path(ge=1)],
     data: IngredienteUpdate,
     _=_STOCK_EDIT,
 ):
     with UnitOfWork() as uow:
-        return service.update(uow, ingrediente_id, data)
+        result = service.update(uow, ingrediente_id, data)
+        # Si cambió el costo, el precio final de los productos que usan este insumo
+        # (precio = costo_insumos * (1 + margen)) debe recalcularse y persistirse.
+        if data.costo_unitario is not None:
+            productos_service.recalcular_precios_por_ingrediente(uow, ingrediente_id)
+    # Un cambio de ingrediente repercute en el costo/precio/stock de los productos que
+    # lo usan: el front invalida ambos catálogos con este evento.
+    await emit_catalogo_evento("ingrediente_actualizado", ingrediente_id=result.id)
+    return result
 
 
 @router.patch("/{ingrediente_id}/reactivar", response_model=IngredienteResponse, summary="Reactivar ingrediente dado de baja")
-def reactivar_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def reactivar_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.reactivar(uow, ingrediente_id)
+        result = service.reactivar(uow, ingrediente_id)
+    await emit_catalogo_evento("ingrediente_actualizado", ingrediente_id=result.id)
+    return result
 
 
 @router.delete("/{ingrediente_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de ingrediente")
-def eliminar_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def eliminar_ingrediente(ingrediente_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
         service.delete(uow, ingrediente_id)
+    await emit_catalogo_evento("ingrediente_eliminado", ingrediente_id=ingrediente_id)

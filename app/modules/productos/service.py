@@ -33,19 +33,28 @@ def _build_response(uow, producto: Producto) -> ProductoRead:
 
     for link in links:
         ing: Optional[Ingrediente] = uow.ingredientes.get_by_id(link.ingrediente_id)
-        if not ing:
-            continue
-        subtotal = Decimal(str(link.cantidad)) * ing.costo_unitario
+        activo = ing is not None
+        if ing is None:
+            # Ingrediente dado de baja: NO lo quitamos de la receta. Lo dejamos visible
+            # como insumo no disponible y con stock 0, para que el producto figure "sin
+            # stock" (stock_disponible = 0) hasta que se reactive el insumo o se actualice
+            # la receta. El costo se conserva: el precio del producto no baja artificialmente.
+            ing = uow.ingredientes.get_by_id_inactivo(link.ingrediente_id)
+            if ing is None:
+                continue
+        cantidad = Decimal(str(link.cantidad))
+        subtotal = cantidad * ing.costo_unitario
         costo_total += subtotal
         insumos_read.append(InsumoEnProductoRead(
             ingrediente_id=ing.id,
             nombre=ing.nombre,
-            cantidad=Decimal(str(link.cantidad)),
+            cantidad=cantidad,
             unidad_medida=ing.unidad_medida,
             costo_unitario=ing.costo_unitario,
             subtotal=subtotal,
-            stock_actual=ing.stock_cantidad,
+            stock_actual=ing.stock_cantidad if activo else Decimal("0"),
             es_producto_terminado=ing.es_producto_terminado,
+            activo=activo,
         ))
 
     categorias_read = [
@@ -82,6 +91,31 @@ def _calcular_precio(insumos: list[Ingrediente], cantidades: dict[int, Decimal],
     """precio = sum(costo_unitario * cantidad) * (1 + margen)"""
     costo = sum(ing.costo_unitario * cantidades[ing.id] for ing in insumos)
     return (costo * (1 + margen)).quantize(Decimal("0.01"))
+
+
+def recalcular_precios_por_ingrediente(uow, ingrediente_id: int) -> list[int]:
+    """
+    Recalcula y persiste el precio_base de todos los productos activos que usan el
+    ingrediente como insumo. Se llama cuando cambia el costo_unitario del ingrediente:
+    como precio = costo_insumos * (1 + margen), una suba del costo debe reflejarse en
+    el precio final del producto. Devuelve los IDs de los productos modificados.
+    """
+    afectados: list[int] = []
+    for producto in uow.productos.get_por_ingrediente(ingrediente_id):
+        links = uow.productos.get_ingrediente_links(producto.id)
+        cantidades = {l.ingrediente_id: Decimal(str(l.cantidad)) for l in links}
+        insumos_orm = [
+            ing for iid in cantidades if (ing := uow.ingredientes.get_by_id(iid)) is not None
+        ]
+        if not insumos_orm:
+            continue
+        nuevo_precio = _calcular_precio(insumos_orm, cantidades, producto.margen_ganancia)
+        if nuevo_precio != producto.precio_base:
+            producto.precio_base = nuevo_precio
+            producto.updated_at = datetime.utcnow()
+            uow.productos.add(producto)
+            afectados.append(producto.id)
+    return afectados
 
 
 def _resolver_unidad_id(uow, unidad_texto: str) -> int:
@@ -227,7 +261,10 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
         cantidades: dict[int, Decimal] = {}
         insumos_orm: list[Ingrediente] = []
         for item in data.insumos:
-            ing = uow.ingredientes.get_by_id(item.ingrediente_id)
+            # get_by_id_any: permite conservar en la receta un insumo dado de baja
+            # (el form de edición lo manda si el admin no lo quitó). Solo 404 si el
+            # ingrediente no existe en absoluto.
+            ing = uow.ingredientes.get_by_id_any(item.ingrediente_id)
             if not ing:
                 _problem("INSUMO_NOT_FOUND", f"Insumo {item.ingrediente_id} no encontrado", status.HTTP_404_NOT_FOUND)
             cantidades[ing.id] = item.cantidad
@@ -244,7 +281,11 @@ def update(uow, producto_id: int, data: ProductoUpdate) -> ProductoRead:
     elif data.margen_ganancia is not None:
         links = uow.productos.get_ingrediente_links(producto_id)
         cantidades = {l.ingrediente_id: Decimal(str(l.cantidad)) for l in links}
-        insumos_orm = [uow.ingredientes.get_by_id(iid) for iid in cantidades]
+        # get_by_id_any: incluir insumos dados de baja para no romper el cálculo si
+        # la receta tiene un ingrediente discontinuado.
+        insumos_orm = [
+            ing for iid in cantidades if (ing := uow.ingredientes.get_by_id_any(iid)) is not None
+        ]
         producto.margen_ganancia = data.margen_ganancia
         producto.precio_base = _calcular_precio(insumos_orm, cantidades, data.margen_ganancia)
 
@@ -286,8 +327,11 @@ def listar_ingredientes(uow, producto_id: int) -> list[InsumoEnProductoRead]:
     insumos = []
     for link in uow.productos.get_ingrediente_links(producto_id):
         ing = uow.ingredientes.get_by_id(link.ingrediente_id)
-        if not ing:
-            continue
+        activo = ing is not None
+        if ing is None:
+            ing = uow.ingredientes.get_by_id_inactivo(link.ingrediente_id)
+            if ing is None:
+                continue
         cantidad = Decimal(str(link.cantidad))
         insumos.append(InsumoEnProductoRead(
             ingrediente_id=ing.id,
@@ -296,8 +340,9 @@ def listar_ingredientes(uow, producto_id: int) -> list[InsumoEnProductoRead]:
             unidad_medida=ing.unidad_medida,
             costo_unitario=ing.costo_unitario,
             subtotal=cantidad * ing.costo_unitario,
-            stock_actual=ing.stock_cantidad,
+            stock_actual=ing.stock_cantidad if activo else Decimal("0"),
             es_producto_terminado=ing.es_producto_terminado,
+            activo=activo,
         ))
     return insumos
 

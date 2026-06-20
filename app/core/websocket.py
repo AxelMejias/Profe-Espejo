@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from fastapi import WebSocket
 
@@ -93,3 +94,31 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Eventos de catálogo en tiempo real (ingredientes / productos)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Roles de staff que reciben los cambios de catálogo. Se reutiliza el canal
+# /ws/admin/pedidos: cualquier staff conectado a ese canal está en estas rooms.
+_STAFF_ROLES_CATALOGO = ["admin", "stock", "pedidos"]
+
+
+async def emit_catalogo_evento(event: str, **fields: Any) -> None:
+    """
+    Emite un evento de catálogo a las rooms de rol del staff para que las pestañas
+    abiertas refresquen sus datos (ingredientes/productos) sin recargar la página.
+
+    Se llama desde el router DESPUÉS de que el UoW commitea. No lanza excepciones:
+    si no hay conexiones activas, es silencioso.
+
+    Eventos: ingrediente_creado | ingrediente_actualizado | ingrediente_eliminado
+             producto_creado    | producto_actualizado    | producto_eliminado
+    """
+    payload = {
+        "event": event,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **fields,
+    }
+    await manager.broadcast_to_roles(_STAFF_ROLES_CATALOGO, payload)

@@ -39,9 +39,25 @@ def get_current_user_payload(
         _problem("NOT_AUTHENTICATED", "No autenticado", status.HTTP_401_UNAUTHORIZED)
 
     try:
-        return decode_access_token(token)
+        payload = decode_access_token(token)
     except JWTError:
         _problem("INVALID_TOKEN", "Token inválido o expirado", status.HTTP_401_UNAUTHORIZED)
+
+    # El token es válido, pero la cuenta pudo haberse dado de baja después de emitirlo.
+    # La baja debe tener efecto INMEDIATO aunque el JWT siga vigente: si el usuario ya
+    # no está activo, se rechaza el acceso (no puede comprar ni operar).
+    sub = payload.get("sub")
+    if sub is not None:
+        from app.core.unit_of_work import UnitOfWork
+        with UnitOfWork() as uow:
+            if uow.usuarios.get_by_id(int(sub)) is None:
+                _problem(
+                    "USER_INACTIVE",
+                    "Tu cuenta fue dada de baja",
+                    status.HTTP_401_UNAUTHORIZED,
+                )
+
+    return payload
 
 
 def get_current_user_id(payload: dict = Depends(get_current_user_payload)) -> int:

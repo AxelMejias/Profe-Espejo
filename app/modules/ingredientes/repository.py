@@ -18,6 +18,13 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
             )
         ).first()
 
+    def get_by_id_any(self, ingrediente_id: int) -> Optional[Ingrediente]:
+        """Busca por id incluyendo dados de baja. Se usa al editar un producto para
+        conservar en la receta un insumo discontinuado (sin romper con 404)."""
+        return self.session.exec(
+            select(Ingrediente).where(Ingrediente.id == ingrediente_id)
+        ).first()
+
     def get_by_nombre(self, nombre: str) -> Optional[Ingrediente]:
         return self.session.exec(
             select(Ingrediente).where(

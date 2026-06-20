@@ -22,6 +22,7 @@ class InsumoEnProductoRead(BaseModel):
     subtotal: Decimal          # cantidad * costo_unitario
     stock_actual: Decimal
     es_producto_terminado: bool
+    activo: bool = True        # False si el ingrediente está dado de baja (insumo no disponible)
 
     model_config = {"from_attributes": True}
 
