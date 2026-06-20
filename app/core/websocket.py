@@ -78,6 +78,10 @@ class ConnectionManager:
     def get_rooms_info(self) -> dict[str, int]:
         return {room: len(sockets) for room, sockets in self.rooms.items()}
 
+    def join_catalogo_publico(self, websocket: WebSocket) -> None:
+        """Suma el socket a la room pública del catálogo (tienda, sin auth)."""
+        self._join_room(websocket, _ROOM_CATALOGO_PUBLICO)
+
     def _join_room(self, websocket: WebSocket, room: str) -> None:
         self.rooms.setdefault(room, set()).add(websocket)
         self.socket_rooms.setdefault(websocket, set()).add(room)
@@ -104,6 +108,10 @@ manager = ConnectionManager()
 # /ws/admin/pedidos: cualquier staff conectado a ese canal está en estas rooms.
 _STAFF_ROLES_CATALOGO = ["admin", "stock", "pedidos"]
 
+# Room pública del catálogo: la tienda (visitantes sin login) se conecta al canal
+# /ws/catalogo y entra acá para recibir los mismos cambios en vivo.
+_ROOM_CATALOGO_PUBLICO = "catalogo:public"
+
 
 async def emit_catalogo_evento(event: str, **fields: Any) -> None:
     """
@@ -121,4 +129,6 @@ async def emit_catalogo_evento(event: str, **fields: Any) -> None:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **fields,
     }
+    # Staff (panel admin) + tienda pública: ambos refrescan el catálogo en vivo.
     await manager.broadcast_to_roles(_STAFF_ROLES_CATALOGO, payload)
+    await manager._emit_to_room(_ROOM_CATALOGO_PUBLICO, payload)

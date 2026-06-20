@@ -27,6 +27,7 @@ from app.modules.auth.router         import router as auth_router
 from app.modules.categorias.router   import router as categorias_router
 from app.modules.ingredientes.router import router as ingredientes_router
 from app.modules.productos.router    import router as productos_router
+from app.modules.productos.ws_router import router as productos_ws_router
 from app.modules.direcciones.router  import router as direcciones_router
 from app.modules.pedidos.router      import router as pedidos_router
 from app.modules.pedidos.ws_router   import router as pedidos_ws_router
@@ -82,6 +83,7 @@ app.include_router(auth_router)
 app.include_router(categorias_router)
 app.include_router(ingredientes_router)
 app.include_router(productos_router)
+app.include_router(productos_ws_router)
 app.include_router(direcciones_router)
 app.include_router(pedidos_router)
 app.include_router(pedidos_ws_router)

@@ -38,6 +38,30 @@ def test_ws_admin_rechaza_cliente_4003(client, client_headers):
     assert exc.value.code == 4003
 
 
+def test_ws_catalogo_publico_sin_token(client):
+    """El canal público del catálogo acepta conexiones sin autenticación (tienda)."""
+    with client.websocket_connect("/ws/catalogo") as ws:
+        ws.close()
+
+
+def test_ws_catalogo_publico_recibe_cambio_de_ingrediente(client, admin_headers):
+    """Un visitante anónimo (sin token) recibe el evento de catálogo cuando el admin
+    cambia un ingrediente, para refrescar la tienda en vivo."""
+    iid = client.post("/api/v1/ingredientes/", headers=admin_headers, json={
+        "nombre": "Insumo WS Publico", "unidad_medida": "g", "costo_unitario": "10.00",
+        "stock_cantidad": "100.000", "stock_minimo": "5.000",
+    }).json()["id"]
+
+    with client.websocket_connect("/ws/catalogo") as ws:
+        r = client.put(f"/api/v1/ingredientes/{iid}", headers=admin_headers,
+                       json={"costo_unitario": "77.00"})
+        assert r.status_code == 200, r.text
+        evento = ws.receive_json()
+
+    assert evento["event"] == "ingrediente_actualizado"
+    assert evento["ingrediente_id"] == iid
+
+
 def test_ws_emite_evento_al_actualizar_precio_ingrediente(client, admin_headers):
     """Cambiar el costo de un ingrediente emite 'ingrediente_actualizado' al staff
     conectado, para que las pestañas abiertas refresquen ingredientes y productos."""
