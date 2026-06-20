@@ -181,6 +181,41 @@ def test_baja_de_insumo_deja_producto_sin_stock(client, admin_headers):
     assert next(i for i in despues["insumos"] if i["ingrediente_id"] == a)["activo"] is True
 
 
+def test_filtro_con_stock_y_sin_stock(client, admin_headers):
+    """El filtro con_stock separa productos producibles (stock > 0) de los que están
+    sin stock (algún insumo agotado o dado de baja)."""
+    def crear_ing(nombre, costo, stock):
+        return client.post("/api/v1/ingredientes/", headers=admin_headers, json={
+            "nombre": nombre, "unidad_medida": "u", "costo_unitario": costo,
+            "stock_cantidad": stock, "stock_minimo": "0.000",
+        }).json()["id"]
+
+    a = crear_ing("Filtro Stock A", "10.00", "100.000")
+    b = crear_ing("Filtro Stock B", "10.00", "1.000")   # stock bajo
+
+    # Con stock: solo insumo A (100 // 2 = 50 producibles).
+    p_con = client.post("/api/v1/productos/", headers=admin_headers, json={
+        "nombre": "Producto Con Stock", "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": a, "cantidad": "2"}],
+    }).json()["id"]
+    # Sin stock: el insumo B requiere 5 pero hay 1.
+    p_sin = client.post("/api/v1/productos/", headers=admin_headers, json={
+        "nombre": "Producto Sin Stock", "margen_ganancia": "0.30",
+        "insumos": [{"ingrediente_id": a, "cantidad": "2"}, {"ingrediente_id": b, "cantidad": "5"}],
+    }).json()["id"]
+
+    ids_con = {p["id"] for p in client.get("/api/v1/productos/?con_stock=true&size=100").json()["items"]}
+    assert p_con in ids_con and p_sin not in ids_con
+
+    ids_sin = {p["id"] for p in client.get("/api/v1/productos/?con_stock=false&size=100").json()["items"]}
+    assert p_sin in ids_sin and p_con not in ids_sin
+
+    # Dar de baja el insumo A deja a "Producto Con Stock" sin stock también.
+    client.delete(f"/api/v1/ingredientes/{a}", headers=admin_headers)
+    ids_sin2 = {p["id"] for p in client.get("/api/v1/productos/?con_stock=false&size=100").json()["items"]}
+    assert p_con in ids_sin2
+
+
 def test_editar_producto_conserva_o_quita_insumo_dado_de_baja(client, admin_headers):
     """Editar un producto con un insumo discontinuado no rompe (no 404): se puede
     guardar conservándolo (queda sin stock) o quitándolo de la receta."""

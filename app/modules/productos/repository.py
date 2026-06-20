@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 from sqlmodel import Session, select
+from sqlalchemy import or_
 from datetime import datetime
 
 from app.modules.productos.model import Producto
@@ -38,6 +39,7 @@ class ProductoRepository(BaseRepository[Producto]):
         categoria_ids: Optional[List[int]] = None,
         solo_disponibles: bool = True,
         solo_destacados: bool = False,
+        con_stock: Optional[bool] = None,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Producto], int]:
@@ -46,6 +48,25 @@ class ProductoRepository(BaseRepository[Producto]):
             query = query.where(Producto.disponible == True)
         if solo_destacados:
             query = query.where(Producto.destacado == True)
+        if con_stock is not None:
+            # Stock real derivado de los insumos: un producto está "sin stock" si tiene
+            # al menos un insumo dado de baja o con stock insuficiente para producir 1
+            # unidad (stock_cantidad < cantidad de la receta). Igual criterio que el
+            # stock_disponible computado y el "Sin stock" de la tienda.
+            sin_stock_ids = (
+                select(ProductoIngrediente.producto_id)
+                .join(Ingrediente, Ingrediente.id == ProductoIngrediente.ingrediente_id)
+                .where(
+                    or_(
+                        Ingrediente.deleted_at != None,
+                        Ingrediente.stock_cantidad < ProductoIngrediente.cantidad,
+                    )
+                )
+            )
+            if con_stock:
+                query = query.where(Producto.id.not_in(sin_stock_ids))
+            else:
+                query = query.where(Producto.id.in_(sin_stock_ids))
         if nombre:
             query = query.where(Producto.nombre.icontains(nombre))
         if precio_min is not None:

@@ -142,6 +142,7 @@ def get_all(
     categoria_id: Optional[int] = None,
     solo_disponibles: bool = True,
     solo_destacados: bool = False,
+    con_stock: Optional[bool] = None,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedProductos:
@@ -153,6 +154,7 @@ def get_all(
         categoria_ids=categoria_ids,
         solo_disponibles=solo_disponibles,
         solo_destacados=solo_destacados,
+        con_stock=con_stock,
         page=page,
         size=size,
     )

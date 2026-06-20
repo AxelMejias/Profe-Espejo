@@ -207,6 +207,7 @@ def listar_productos(
     categoria_id:     Annotated[Optional[int],   Query(ge=1)]           = None,
     solo_disponibles: Annotated[bool, Query()]                          = True,
     solo_destacados:  Annotated[bool, Query()]                          = False,
+    con_stock:        Annotated[Optional[bool], Query()]                = None,
     page:             Annotated[int, Query(ge=1)]                       = 1,
     size:             Annotated[int, Query(ge=1, le=100)]               = 20,
 ):
@@ -214,7 +215,7 @@ def listar_productos(
         return service.get_all(
             uow, nombre=nombre, precio_min=precio_min, precio_max=precio_max,
             categoria_id=categoria_id, solo_disponibles=solo_disponibles,
-            solo_destacados=solo_destacados, page=page, size=size,
+            solo_destacados=solo_destacados, con_stock=con_stock, page=page, size=size,
         )
 
 
