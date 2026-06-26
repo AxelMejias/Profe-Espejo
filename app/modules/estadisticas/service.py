@@ -11,11 +11,8 @@ Reglas según la Especificación Técnica v6.0:
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-import sqlalchemy as sa
-from sqlmodel import Session, select, func
+from sqlmodel import Session
 
-from app.modules.pedidos.model import Pedido, DetallePedido
-from app.modules.pagos.model import Pago
 from app.modules.estadisticas.repository import EstadisticasRepository
 from app.modules.estadisticas.schemas import (
     DashboardResponse, ProductoMasVendido, VentasPorPeriodo,
@@ -23,8 +20,6 @@ from app.modules.estadisticas.schemas import (
     IngresosFormaPagoItem, ResumenResponse, AlertasStockResponse,
 )
 from app.modules.productos import service as productos_service
-
-_ESTADO_CANCELADO = "CANCELADO"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -125,36 +120,13 @@ def get_alertas_stock(uow) -> AlertasStockResponse:
 
 
 def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> DashboardResponse:
-    # EST-03: solo pedidos con pago approved
-    # EST-01: excluir CANCELADO
-    # EST-05: BETWEEN sobre date
-
-    # Convertir created_at (UTC) a hora Argentina antes de extraer la fecha
-    fecha_ar = sa.func.date(
-        sa.cast(Pedido.created_at, sa.DateTime(timezone=False))
-        + sa.text("INTERVAL '-3 hours'")
-    )
-
-    pedidos_aprobados = (
-        select(Pedido.id, Pedido.total, fecha_ar.label("fecha"))
-        .join(Pago, Pago.pedido_id == Pedido.id)
-        .where(
-            Pago.mp_status == "approved",
-            Pedido.estado_codigo != _ESTADO_CANCELADO,
-            Pedido.deleted_at.is_(None),
-            fecha_ar.between(fecha_desde, fecha_hasta),
-        )
-    ).subquery()
+    # Reglas de negocio (mapeo a schema, redondeo, ticket promedio) acá; las queries
+    # viven en el repository (EST-01/03/05 aplicados en _pedidos_aprobados_subq).
+    repo = EstadisticasRepository(session)
 
     # ── Ingreso total y conteo de pedidos ─────────────────────────────────────
-    resumen = session.exec(
-        select(
-            func.coalesce(func.sum(pedidos_aprobados.c.total), Decimal("0")).label("ingreso"),
-            func.count(pedidos_aprobados.c.id).label("pedidos"),
-        )
-    ).one()
-
-    ingreso_total = Decimal(str(resumen.ingreso)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    resumen = repo.get_dashboard_resumen(fecha_desde, fecha_hasta)
+    ingreso_total = _q(resumen.ingreso)
     pedidos_completados = int(resumen.pedidos)
     ticket_promedio = (
         (ingreso_total / pedidos_completados).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -163,47 +135,24 @@ def get_dashboard(session: Session, fecha_desde: date, fecha_hasta: date) -> Das
     )
 
     # ── Productos más vendidos (EST-02: subtotal_snap) ────────────────────────
-    top_rows = session.exec(
-        select(
-            DetallePedido.producto_id,
-            DetallePedido.nombre_snapshot,
-            func.sum(DetallePedido.cantidad).label("cantidad_total"),
-            func.sum(DetallePedido.subtotal_snap).label("ingreso_total"),
-        )
-        .where(DetallePedido.pedido_id.in_(select(pedidos_aprobados.c.id)))
-        .group_by(DetallePedido.producto_id, DetallePedido.nombre_snapshot)
-        .order_by(sa.desc("cantidad_total"))
-        .limit(5)
-    ).all()
-
     productos_mas_vendidos = [
         ProductoMasVendido(
             producto_id=r.producto_id,
             nombre=r.nombre_snapshot,
             cantidad_total=int(r.cantidad_total),
-            ingreso_total=Decimal(str(r.ingreso_total)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            ingreso_total=_q(r.ingreso_total),
         )
-        for r in top_rows
+        for r in repo.get_dashboard_top_productos(fecha_desde, fecha_hasta, limit=5)
     ]
 
     # ── Ventas por día (EST-05: agrupado por date) ────────────────────────────
-    dias_rows = session.exec(
-        select(
-            pedidos_aprobados.c.fecha,
-            func.count(pedidos_aprobados.c.id).label("pedidos"),
-            func.sum(pedidos_aprobados.c.total).label("ingreso"),
-        )
-        .group_by(pedidos_aprobados.c.fecha)
-        .order_by(pedidos_aprobados.c.fecha)
-    ).all()
-
     ventas_por_dia = [
         VentasPorPeriodo(
             fecha=r.fecha,
             pedidos=int(r.pedidos),
-            ingreso=Decimal(str(r.ingreso)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            ingreso=_q(r.ingreso),
         )
-        for r in dias_rows
+        for r in repo.get_dashboard_ventas_por_dia(fecha_desde, fecha_hasta)
     ]
 
     return DashboardResponse(

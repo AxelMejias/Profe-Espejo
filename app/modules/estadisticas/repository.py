@@ -139,3 +139,58 @@ class EstadisticasRepository:
             )
         ).one()
         return int(total)
+
+    # ── Dashboard combinado (endpoint legacy /dashboard) ───────────────────────
+    # Definición de ingreso propia del dashboard legacy: solo pedidos con un Pago
+    # MercadoPago aprobado (EST-03), no cancelados, en el rango (hora AR).
+    def _pedidos_aprobados_subq(self, desde: date, hasta: date):
+        fecha = _ar_date().label("fecha")
+        return (
+            select(Pedido.id, Pedido.total, fecha)
+            .join(Pago, Pago.pedido_id == Pedido.id)
+            .where(
+                Pago.mp_status == "approved",
+                Pedido.estado_codigo != _ESTADO_CANCELADO,
+                Pedido.deleted_at.is_(None),
+                _ar_date().between(desde, hasta),
+            )
+        ).subquery()
+
+    def get_dashboard_resumen(self, desde: date, hasta: date):
+        """(ingreso_total, cantidad_pedidos) de pedidos aprobados en el rango."""
+        sub = self._pedidos_aprobados_subq(desde, hasta)
+        return self.session.exec(
+            select(
+                func.coalesce(func.sum(sub.c.total), 0).label("ingreso"),
+                func.count(sub.c.id).label("pedidos"),
+            )
+        ).one()
+
+    def get_dashboard_top_productos(self, desde: date, hasta: date, limit: int = 5):
+        """Top productos por cantidad vendida (EST-02: subtotal_snap)."""
+        sub = self._pedidos_aprobados_subq(desde, hasta)
+        return self.session.exec(
+            select(
+                DetallePedido.producto_id,
+                DetallePedido.nombre_snapshot,
+                func.sum(DetallePedido.cantidad).label("cantidad_total"),
+                func.sum(DetallePedido.subtotal_snap).label("ingreso_total"),
+            )
+            .where(DetallePedido.pedido_id.in_(select(sub.c.id)))
+            .group_by(DetallePedido.producto_id, DetallePedido.nombre_snapshot)
+            .order_by(sa.desc("cantidad_total"))
+            .limit(limit)
+        ).all()
+
+    def get_dashboard_ventas_por_dia(self, desde: date, hasta: date):
+        """Ingreso y cantidad de pedidos agrupados por día (hora AR)."""
+        sub = self._pedidos_aprobados_subq(desde, hasta)
+        return self.session.exec(
+            select(
+                sub.c.fecha,
+                func.count(sub.c.id).label("pedidos"),
+                func.sum(sub.c.total).label("ingreso"),
+            )
+            .group_by(sub.c.fecha)
+            .order_by(sub.c.fecha)
+        ).all()
