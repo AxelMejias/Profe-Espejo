@@ -7,6 +7,7 @@ from app.modules.categorias.schemas import (
 from app.modules.categorias import service
 from app.core.dependencies import require_role
 from app.core.unit_of_work import UnitOfWork
+from app.core.websocket import emit_catalogo_evento
 
 router = APIRouter(prefix="/api/v1/categorias", tags=["Categorías"])
 
@@ -59,19 +60,25 @@ def listar_subcategorias(categoria_id: Annotated[int, Path(ge=1)]):
 
 
 @router.post("/", response_model=CategoriaRead, status_code=status.HTTP_201_CREATED, summary="Crear categoría")
-def crear_categoria(data: CategoriaCreate, _=_ADMIN):
+async def crear_categoria(data: CategoriaCreate, _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.create(uow, data)
+        result = service.create(uow, data)
+    # Aviso en vivo: la tienda pública y las pestañas admin refrescan el árbol/lista
+    # de categorías sin recargar.
+    await emit_catalogo_evento("categoria_creada", categoria_id=result.id)
+    return result
 
 
 @router.put("/{categoria_id}", response_model=CategoriaRead, summary="Actualizar categoría")
-def actualizar_categoria(
+async def actualizar_categoria(
     categoria_id: Annotated[int, Path(ge=1)],
     data: CategoriaUpdate,
     _=_ADMIN,
 ):
     with UnitOfWork() as uow:
-        return service.update(uow, categoria_id, data)
+        result = service.update(uow, categoria_id, data)
+    await emit_catalogo_evento("categoria_actualizada", categoria_id=result.id)
+    return result
 
 
 @router.patch(
@@ -79,12 +86,15 @@ def actualizar_categoria(
     response_model=CategoriaRead,
     summary="Reactivar una categoría dada de baja",
 )
-def reactivar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def reactivar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
-        return service.reactivar(uow, categoria_id)
+        result = service.reactivar(uow, categoria_id)
+    await emit_catalogo_evento("categoria_actualizada", categoria_id=result.id)
+    return result
 
 
 @router.delete("/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Baja lógica de categoría")
-def eliminar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
+async def eliminar_categoria(categoria_id: Annotated[int, Path(ge=1)], _=_ADMIN):
     with UnitOfWork() as uow:
         service.delete(uow, categoria_id)
+    await emit_catalogo_evento("categoria_eliminada", categoria_id=categoria_id)

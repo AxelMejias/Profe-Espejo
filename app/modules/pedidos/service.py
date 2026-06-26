@@ -572,6 +572,14 @@ async def emit_ws_evento(pedido_id: int, event: Optional[str] = None) -> None:
     await manager.broadcast_to_order(pedido_id, payload)
     await manager.broadcast_to_roles(_ROLES_STAFF_WS, payload)
 
+    # Si la transición movió stock (CONFIRMADO descuenta insumos, CANCELADO los
+    # restaura), avisamos también al canal público de catálogo para que la tienda
+    # y el carrito de TODOS los clientes reflejen el nuevo stock en vivo (un cliente
+    # ve "Sin stock" al instante cuando otro compra la última unidad).
+    if estado_nuevo in (_ESTADO_CONFIRMADO, _ESTADO_CANCELADO):
+        from app.core.websocket import emit_catalogo_evento
+        await emit_catalogo_evento("producto_actualizado")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Callbacks de MercadoPago (llamados desde el redirect del backend)
