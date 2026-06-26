@@ -1,7 +1,6 @@
 from io import BytesIO
 from typing import Annotated, Optional
 import math
-from decimal import Decimal
 from fastapi import APIRouter, Depends, Query, Path, Body, UploadFile, File, status, HTTPException  # noqa: F401
 from fastapi.responses import StreamingResponse
 import openpyxl
@@ -23,8 +22,6 @@ router = APIRouter(prefix="/api/v1/productos", tags=["Productos"])
 # son navegables sin autenticación).
 _DISPONIBILIDAD = Depends(require_role(["ADMIN", "STOCK"]))   # toggle disponibilidad
 _ADMIN          = Depends(require_role(["ADMIN"]))             # crear, editar, borrar, importar, reactivar
-
-_BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
 
 
 @router.get("/exportar", summary="Exportar productos activos a Excel")
@@ -89,10 +86,6 @@ def descargar_plantilla(_=_ADMIN):
 
 @router.post("/importar", summary="Importar productos desde Excel")
 async def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
-    from app.modules.productos.model import Producto
-    from app.core.links import ProductoIngrediente
-    from sqlmodel import select
-
     contents = archivo.file.read()
     wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
     ws = wb.active
@@ -101,94 +94,18 @@ async def importar_productos(archivo: UploadFile = File(...), _=_ADMIN):
     omitidos = 0
     errores = []
 
+    # El router solo orquesta: lee el archivo, abre una transacción por fila y
+    # delega la lógica de negocio (validación, parseo, precio, alta) al service.
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         if not row or all(v is None for v in row):
             continue
         try:
-            nombre = str(row[0]).strip() if row[0] is not None else ""
-            descripcion = str(row[1]).strip() if len(row) > 1 and row[1] is not None else None
-            margen_raw = row[2] if len(row) > 2 and row[2] is not None else None
-            disponible_raw = str(row[3]).upper().strip() if len(row) > 3 and row[3] is not None else "TRUE"
-            cats_raw = str(row[4]).strip() if len(row) > 4 and row[4] is not None else ""
-            insumos_raw = str(row[5]).strip() if len(row) > 5 and row[5] is not None else ""
-
-            if not nombre:
-                errores.append({"fila": idx, "nombre": "", "motivo": "Nombre requerido"})
-                continue
-            if margen_raw is None:
-                errores.append({"fila": idx, "nombre": nombre, "motivo": "Margen de ganancia requerido"})
-                continue
-            if not insumos_raw:
-                errores.append({"fila": idx, "nombre": nombre, "motivo": "Insumos requeridos"})
-                continue
-
-            margen = Decimal(str(margen_raw))
-            disponible = disponible_raw in _BOOL_MAP
-
-            # Parsear insumos: "nombre:cantidad, nombre:cantidad"
-            insumo_pairs = []
-            for par in insumos_raw.split(","):
-                par = par.strip()
-                if not par:
-                    continue
-                if ":" not in par:
-                    errores.append({"fila": idx, "nombre": nombre, "motivo": f"Formato de insumo inválido: '{par}'"})
-                    break
-                nombre_ing, cantidad_str = par.rsplit(":", 1)
-                insumo_pairs.append((nombre_ing.strip(), Decimal(cantidad_str.strip())))
+            with UnitOfWork() as uow:
+                resultado = service.importar_fila(uow, row)
+            if resultado == "creado":
+                creados += 1
             else:
-                if not insumo_pairs:
-                    errores.append({"fila": idx, "nombre": nombre, "motivo": "Debe tener al menos un insumo"})
-                    continue
-
-                with UnitOfWork() as uow:
-                    if uow.productos.get_by_nombre(nombre):
-                        omitidos += 1
-                        continue
-
-                    insumos_orm = []
-                    cantidades = {}
-                    fallo = False
-                    for nombre_ing, cantidad in insumo_pairs:
-                        ing = uow.ingredientes.get_by_nombre(nombre_ing)
-                        if not ing:
-                            errores.append({"fila": idx, "nombre": nombre, "motivo": f"Ingrediente '{nombre_ing}' no encontrado"})
-                            fallo = True
-                            break
-                        cantidades[ing.id] = cantidad
-                        insumos_orm.append(ing)
-
-                    if fallo:
-                        continue
-
-                    costo = sum(ing.costo_unitario * cantidades[ing.id] for ing in insumos_orm)
-                    precio = (costo * (1 + margen)).quantize(Decimal("0.01"))
-
-                    producto = Producto(
-                        nombre=nombre,
-                        descripcion=descripcion or None,
-                        precio_base=precio,
-                        margen_ganancia=margen,
-                        disponible=disponible,
-                    )
-                    uow.productos.add(producto)
-
-                    for ing in insumos_orm:
-                        uow.productos.add_ingrediente_link(
-                            producto_id=producto.id,
-                            ingrediente_id=ing.id,
-                            cantidad=float(cantidades[ing.id]),
-                            unidad_medida_id=service._resolver_unidad_id(uow, ing.unidad_medida),
-                        )
-
-                    if cats_raw:
-                        nombres_cats = [c.strip() for c in cats_raw.split(",") if c.strip()]
-                        cats = [c for n in nombres_cats for c in [uow.categorias.get_by_nombre(n)] if c]
-                        if cats:
-                            producto.categorias = cats
-                            uow.productos.add(producto)
-
-                    creados += 1
+                omitidos += 1
         except Exception as e:
             nombre_str = str(row[0]) if row and row[0] is not None else ""
             errores.append({"fila": idx, "nombre": nombre_str, "motivo": str(e)})

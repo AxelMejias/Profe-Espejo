@@ -19,8 +19,6 @@ _LEER       = Depends(require_role(["ADMIN", "STOCK", "PEDIDOS", "CLIENT"]))
 _STOCK_EDIT = Depends(require_role(["ADMIN", "STOCK"]))   # leer + actualizar stock vía PUT
 _ADMIN      = Depends(require_role(["ADMIN"]))             # crear, borrar, importar, reactivar
 
-_BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
-
 
 @router.get("/exportar", summary="Exportar ingredientes activos a Excel")
 def exportar_ingredientes(_=_STOCK_EDIT):
@@ -71,8 +69,6 @@ def descargar_plantilla(_=_ADMIN):
 
 @router.post("/importar", summary="Importar ingredientes desde Excel")
 async def importar_ingredientes(archivo: UploadFile = File(...), _=_ADMIN):
-    from app.modules.ingredientes.model import Ingrediente
-
     contents = archivo.file.read()
     wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
     ws = wb.active
@@ -81,50 +77,18 @@ async def importar_ingredientes(archivo: UploadFile = File(...), _=_ADMIN):
     omitidos = 0
     errores = []
 
+    # El router solo orquesta: lee el archivo, abre una transacción por fila y
+    # delega la lógica de negocio (validación, dedupe, alta) al service.
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         if not row or all(v is None for v in row):
             continue
         try:
-            nombre = str(row[0]).strip() if row[0] is not None else ""
-            descripcion = str(row[1]).strip() if len(row) > 1 and row[1] is not None else None
-            unidad_medida = str(row[2]).strip() if len(row) > 2 and row[2] is not None else ""
-            costo_raw = row[3] if len(row) > 3 else None
-            stock_raw = row[4] if len(row) > 4 else 0
-            minimo_raw = row[5] if len(row) > 5 else 0
-            alergeno_raw = str(row[6]).upper().strip() if len(row) > 6 and row[6] is not None else "FALSE"
-            terminado_raw = str(row[7]).upper().strip() if len(row) > 7 and row[7] is not None else "FALSE"
-
-            if not nombre:
-                errores.append({"fila": idx, "nombre": "", "motivo": "Nombre requerido"})
-                continue
-            if not unidad_medida:
-                errores.append({"fila": idx, "nombre": nombre, "motivo": "Unidad de medida requerida"})
-                continue
-            if costo_raw is None:
-                errores.append({"fila": idx, "nombre": nombre, "motivo": "Costo unitario requerido"})
-                continue
-
-            costo = float(costo_raw)
-            if costo < 0:
-                errores.append({"fila": idx, "nombre": nombre, "motivo": "Costo unitario debe ser >= 0"})
-                continue
-
             with UnitOfWork() as uow:
-                if uow.ingredientes.get_by_nombre(nombre):
-                    omitidos += 1
-                    continue
-                ing = Ingrediente(
-                    nombre=nombre,
-                    descripcion=descripcion or None,
-                    unidad_medida=unidad_medida,
-                    costo_unitario=costo,
-                    stock_cantidad=float(stock_raw) if stock_raw is not None else 0,
-                    stock_minimo=float(minimo_raw) if minimo_raw is not None else 0,
-                    es_alergeno=alergeno_raw in _BOOL_MAP,
-                    es_producto_terminado=terminado_raw in _BOOL_MAP,
-                )
-                uow.ingredientes.add(ing)
+                resultado = service.importar_fila(uow, row)
+            if resultado == "creado":
                 creados += 1
+            else:
+                omitidos += 1
         except Exception as e:
             nombre_str = str(row[0]) if row and row[0] is not None else ""
             errores.append({"fila": idx, "nombre": nombre_str, "motivo": str(e)})

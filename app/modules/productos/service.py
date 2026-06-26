@@ -400,6 +400,90 @@ def delete(uow, producto_id: int) -> None:
     uow.productos.soft_delete(producto)
 
 
+# ── Importación desde Excel ─────────────────────────────────────────────────────
+_BOOL_MAP = {"TRUE", "VERDADERO", "SI", "SÍ", "S", "1"}
+
+
+def importar_fila(uow, row) -> str:
+    """Procesa una fila del Excel de importación de productos.
+
+    Devuelve "creado" u "omitido" (nombre ya existente). Lanza ValueError(motivo)
+    si la fila es inválida; el router lo registra como error de esa fila. Toda la
+    lógica (validación, parseo de insumos, cálculo de precio reutilizando
+    _calcular_precio, alta del maestro-detalle) vive acá; el router solo aporta el
+    parseo del archivo y la transacción por fila.
+    """
+    nombre = str(row[0]).strip() if row[0] is not None else ""
+    descripcion = str(row[1]).strip() if len(row) > 1 and row[1] is not None else None
+    margen_raw = row[2] if len(row) > 2 and row[2] is not None else None
+    disponible_raw = str(row[3]).upper().strip() if len(row) > 3 and row[3] is not None else "TRUE"
+    cats_raw = str(row[4]).strip() if len(row) > 4 and row[4] is not None else ""
+    insumos_raw = str(row[5]).strip() if len(row) > 5 and row[5] is not None else ""
+
+    if not nombre:
+        raise ValueError("Nombre requerido")
+    if margen_raw is None:
+        raise ValueError("Margen de ganancia requerido")
+    if not insumos_raw:
+        raise ValueError("Insumos requeridos")
+
+    margen = Decimal(str(margen_raw))
+    disponible = disponible_raw in _BOOL_MAP
+
+    # Parsear insumos: "nombre:cantidad, nombre:cantidad"
+    insumo_pairs: list[tuple[str, Decimal]] = []
+    for par in insumos_raw.split(","):
+        par = par.strip()
+        if not par:
+            continue
+        if ":" not in par:
+            raise ValueError(f"Formato de insumo inválido: '{par}'")
+        nombre_ing, cantidad_str = par.rsplit(":", 1)
+        insumo_pairs.append((nombre_ing.strip(), Decimal(cantidad_str.strip())))
+    if not insumo_pairs:
+        raise ValueError("Debe tener al menos un insumo")
+
+    if uow.productos.get_by_nombre(nombre):
+        return "omitido"
+
+    cantidades: dict[int, Decimal] = {}
+    insumos_orm: list[Ingrediente] = []
+    for nombre_ing, cantidad in insumo_pairs:
+        ing = uow.ingredientes.get_by_nombre(nombre_ing)
+        if not ing:
+            raise ValueError(f"Ingrediente '{nombre_ing}' no encontrado")
+        cantidades[ing.id] = cantidad
+        insumos_orm.append(ing)
+
+    precio = _calcular_precio(insumos_orm, cantidades, margen)
+
+    producto = Producto(
+        nombre=nombre,
+        descripcion=descripcion or None,
+        precio_base=precio,
+        margen_ganancia=margen,
+        disponible=disponible,
+    )
+    uow.productos.add(producto)
+
+    for ing in insumos_orm:
+        uow.productos.add_ingrediente_link(
+            producto_id=producto.id,
+            ingrediente_id=ing.id,
+            cantidad=float(cantidades[ing.id]),
+            unidad_medida_id=_resolver_unidad_id(uow, ing.unidad_medida),
+        )
+
+    if cats_raw:
+        nombres_cats = [c.strip() for c in cats_raw.split(",") if c.strip()]
+        cats = [c for n in nombres_cats for c in [uow.categorias.get_by_nombre(n)] if c]
+        if cats:
+            producto.categorias = cats
+            uow.productos.add(producto)
+
+    return "creado"
+
+
 def reactivar(uow, producto_id: int) -> ProductoRead:
     producto = uow.productos.get_by_id_inactivo(producto_id)
     if not producto:
