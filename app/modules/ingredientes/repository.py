@@ -45,6 +45,7 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
         es_alergeno: Optional[bool] = None,
         es_producto_terminado: Optional[bool] = None,
         unidad_medida: Optional[str] = None,
+        stock_bajo: Optional[bool] = None,
         page: int = 1,
         size: int = 20,
     ) -> Tuple[List[Ingrediente], int]:
@@ -62,10 +63,29 @@ class IngredienteRepository(BaseRepository[Ingrediente]):
             query = query.where(
                 (Ingrediente.es_producto_terminado == False) | (Ingrediente.es_producto_terminado == None)
             )
+        if stock_bajo is True:
+            query = query.where(self._cond_stock_bajo())
         total = len(self.session.exec(query).all())
         offset = (page - 1) * size
         items = list(self.session.exec(query.offset(offset).limit(size)).all())
         return items, total
+
+    @staticmethod
+    def _cond_stock_bajo():
+        """Ingrediente en o por debajo de su mínimo (con mínimo definido > 0).
+        Mismo criterio que el ⚠️ que muestra la UI."""
+        return (
+            (Ingrediente.stock_minimo > 0)
+            & (Ingrediente.stock_cantidad <= Ingrediente.stock_minimo)
+        )
+
+    def count_stock_bajo(self) -> int:
+        """Cantidad de ingredientes activos en o por debajo del stock mínimo."""
+        query = select(Ingrediente).where(
+            Ingrediente.deleted_at == None,
+            self._cond_stock_bajo(),
+        )
+        return len(self.session.exec(query).all())
 
     def get_all_activos(self) -> List[Ingrediente]:
         return list(

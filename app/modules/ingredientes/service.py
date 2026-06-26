@@ -27,6 +27,7 @@ def get_all(
     es_alergeno: Optional[bool] = None,
     es_producto_terminado: Optional[bool] = None,
     unidad_medida: Optional[str] = None,
+    stock_bajo: Optional[bool] = None,
     page: int = 1,
     size: int = 20,
 ) -> PaginatedIngredientes:
@@ -34,6 +35,7 @@ def get_all(
         nombre=nombre, es_alergeno=es_alergeno,
         es_producto_terminado=es_producto_terminado,
         unidad_medida=unidad_medida,
+        stock_bajo=stock_bajo,
         page=page, size=size,
     )
     return PaginatedIngredientes(

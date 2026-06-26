@@ -140,6 +140,7 @@ def listar_ingredientes(
     unidad_medida:         Annotated[Optional[str],  Query(max_length=50)]  = None,
     es_alergeno:           Annotated[Optional[bool], Query()]               = None,
     es_producto_terminado: Annotated[Optional[bool], Query()]               = None,
+    stock_bajo:            Annotated[Optional[bool], Query()]               = None,
     page:                  Annotated[int, Query(ge=1)]                      = 1,
     size:                  Annotated[int, Query(ge=1, le=100)]              = 20,
     _=_LEER,
@@ -148,7 +149,8 @@ def listar_ingredientes(
         return service.get_all(
             uow, nombre=nombre, es_alergeno=es_alergeno,
             es_producto_terminado=es_producto_terminado,
-            unidad_medida=unidad_medida, page=page, size=size,
+            unidad_medida=unidad_medida, stock_bajo=stock_bajo,
+            page=page, size=size,
         )
 
 

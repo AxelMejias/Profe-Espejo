@@ -4,10 +4,12 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import require_role
 from app.core.database import get_session
+from app.core.unit_of_work import UnitOfWork
 from app.modules.estadisticas import service
 from app.modules.estadisticas.schemas import (
     DashboardResponse, VentasPeriodoItem, ProductoTopItem,
     PedidosEstadoItem, IngresosFormaPagoItem, ResumenResponse,
+    AlertasStockResponse,
 )
 
 router = APIRouter(prefix="/api/v1/estadisticas", tags=["Estadísticas"])
@@ -73,3 +75,9 @@ def get_resumen(
     session=Depends(get_session),
 ):
     return service.get_resumen(session)
+
+
+@router.get("/alertas-stock", response_model=AlertasStockResponse, summary="Avisos de reposición (ingredientes bajo mínimo y productos sin stock)")
+def get_alertas_stock(_=_ADMIN):
+    with UnitOfWork() as uow:
+        return service.get_alertas_stock(uow)

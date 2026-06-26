@@ -20,8 +20,9 @@ from app.modules.estadisticas.repository import EstadisticasRepository
 from app.modules.estadisticas.schemas import (
     DashboardResponse, ProductoMasVendido, VentasPorPeriodo,
     VentasPeriodoItem, ProductoTopItem, PedidosEstadoItem,
-    IngresosFormaPagoItem, ResumenResponse,
+    IngresosFormaPagoItem, ResumenResponse, AlertasStockResponse,
 )
+from app.modules.productos import service as productos_service
 
 _ESTADO_CANCELADO = "CANCELADO"
 
@@ -103,6 +104,23 @@ def get_resumen(session: Session) -> ResumenResponse:
         ticket_promedio=_q(ticket),
         pedidos_activos=repo.get_pedidos_activos(),
         ventas_mes=_q(total_mes),
+    )
+
+
+def get_alertas_stock(uow) -> AlertasStockResponse:
+    """Conteos para los avisos de reposición del dashboard.
+
+    Reutiliza el filtro `con_stock=False` del catálogo de productos (mismo criterio
+    que el "Sin stock" de la tienda) y el conteo de ingredientes bajo mínimo del
+    repositorio, para no duplicar la regla de negocio.
+    """
+    productos_sin_stock = productos_service.get_all(
+        uow, solo_disponibles=False, con_stock=False, page=1, size=1
+    ).total
+    ingredientes_stock_bajo = uow.ingredientes.count_stock_bajo()
+    return AlertasStockResponse(
+        ingredientes_stock_bajo=ingredientes_stock_bajo,
+        productos_sin_stock=productos_sin_stock,
     )
 
 

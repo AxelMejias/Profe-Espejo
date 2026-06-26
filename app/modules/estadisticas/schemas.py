@@ -62,3 +62,13 @@ class ResumenResponse(BaseModel):
     ticket_promedio: Decimal
     pedidos_activos: int
     ventas_mes: Decimal
+
+
+class AlertasStockResponse(BaseModel):
+    """GET /estadisticas/alertas-stock — avisos de reposición para el dashboard.
+
+    - ingredientes_stock_bajo: ingredientes activos en o por debajo del mínimo.
+    - productos_sin_stock: productos cuyo stock derivado de insumos es 0.
+    """
+    ingredientes_stock_bajo: int
+    productos_sin_stock: int
